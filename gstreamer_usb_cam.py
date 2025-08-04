@@ -23,7 +23,8 @@ def start_gstreamer(width, height, bitrate):
         'videoparse', f'width={width}', f'height={height}', 'format=rgb', 'framerate=30/1', '!',
         'videoconvert', '!',
         'x264enc', 'tune=zerolatency', f'bitrate={bitrate}', 'speed-preset=ultrafast', '!',
-        'rtph264pay', '!', 'udpsink', 'host=192.168.11.100', 'port=5000'
+        'rtph264pay', 'config-interval=1', 'pt=96', '!',
+        'udpsink', 'host=192.168.11.100', 'port=5000'
     ]
     return subprocess.Popen(gst_cmd, stdin=subprocess.PIPE)
 
