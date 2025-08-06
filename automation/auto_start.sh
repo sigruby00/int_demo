@@ -14,4 +14,5 @@ sleep 2
 # Execute the Iperf clinet
 
 echo "[INFO] Starting iperf client..."
-./execute_iperf_client.sh
+# ./execute_iperf_client.sh
+docker exec -u ubuntu -w /home/ubuntu MentorPi /bin/bash -c "/home/ubuntu/shared/int_demo/iperf3_client.sh"
