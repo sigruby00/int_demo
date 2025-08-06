@@ -12,7 +12,6 @@ docker exec -u ubuntu -w /home/ubuntu MentorPi /bin/zsh -c "source ~/.zshrc; pyt
 sleep 2
 
 # Execute the Iperf clinet
-
 echo "[INFO] Starting iperf client..."
 # ./execute_iperf_client.sh
 docker exec -u ubuntu -w /home/ubuntu MentorPi /bin/bash -c "source ~/.zshrc; /home/ubuntu/shared/int_demo/execute_iperf_client.sh"

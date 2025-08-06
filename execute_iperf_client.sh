@@ -1,5 +1,5 @@
 #!/bin/bash
-
+cd /home/ubuntu/shared/int_demo  # config.py 있는 디렉토리로 이동
 # Python을 사용해 config.py의 to_id 값을 읽기
 TO_ID=$(python3 -c "import config; print(config.to_id)")
 
