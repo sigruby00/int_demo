@@ -15,13 +15,15 @@ TO_IP_LIST = [
     {"to_id": 8, "to_ip": "10.100.30.28"}
 ]
 
-def start_gstreamer():
+def start_gstreamer(to_id):
+    to_ip = next((item['to_ip'] for item in TO_IP_LIST if item
+                     ['to_id'] == to_id), None)
     gst_cmd = [
         'gst-launch-1.0', '!',
         'v4l2src', 'device=/dev/video2', '!',
         'video/x-h264,width=1920,height=1080, framerate=30/1', '!',
         'rtph264pay', 'config-interval=1', 'pt=96', '!',
-        'udpsink', 'host=10.100.30.23', 'port=5000'
+        'udpsink', 'host={}'.format(to_ip), 'port=5000'
     ]
     return subprocess.Popen(gst_cmd, stdin=subprocess.PIPE)
 
