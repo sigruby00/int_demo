@@ -15,7 +15,7 @@ TO_IP_LIST = [
     {"to_id": 8, "to_ip": "10.100.30.28"}
 ]
 
-def start_gstreamer(width, height, bitrate):
+def start_gstreamer():
     gst_cmd = [
         'gst-launch-1.0', '!',
         'v4l2src', 'device=/dev/video2', '!',
