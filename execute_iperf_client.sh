@@ -7,4 +7,4 @@ TO_ID=$(python3 -c "import config; print(config.to_id)")
 TARGET_IP="10.100.30.2${TO_ID}"
 
 # iperf3 실행
-iperf3 -c "$TARGET_IP" -u -b 300M -t 999999
+iperf3 -c "$TARGET_IP" -u -b 300M -t 86400
