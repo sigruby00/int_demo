@@ -7,6 +7,8 @@ echo "⬇️ Installing Iperf3"
 
 sudo apt install -y iperf3
 
+sudo apt install -y nload
+
 echo "⬇️ Installing GStreamer and all major plugin packages..."
 sudo apt install -y \
   gstreamer1.0-tools \
