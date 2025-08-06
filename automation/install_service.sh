@@ -1,10 +1,9 @@
 #!/bin/bash
-
 SERVICE_NAME="int_demo"
 SCRIPT_PATH="/home/pi/docker/tmp/int_demo/automation/auto_start.sh"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
-echo "[INFO] Creating systemd service for SV Robot..."
+echo "[INFO] Creating systemd service for Int Demo..."
 
 # 1. 서비스 파일 생성
 sudo tee "$SERVICE_FILE" > /dev/null <<EOF
@@ -18,7 +17,7 @@ Type=simple
 User=pi
 WorkingDirectory=/home/pi/docker/tmp/int_demo
 Environment=HOME=/home/pi SHELL=/bin/zsh PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
-ExecStart=/bin/bash /home/pi/docker/tmp/sv_robot/automation/auto_start.sh
+ExecStart=/bin/bash /home/pi/docker/tmp/int_demo/automation/auto_start.sh
 StandardOutput=journal
 StandardError=journal
 Restart=no
