@@ -6,8 +6,11 @@ echo "[INFO] Pulling latest code from GitHub..."
 git pull origin main
 sleep 5
 
+# Execute the Network Sensing Script
+#TODO: add...
+
 # Execute the Gstreamer script
-echo "[INFO] Starting ros_monitor_docker.py..."
+echo "[INFO] Starting GStreamer Sender ..."
 docker exec -u ubuntu -w /home/ubuntu MentorPi /bin/zsh -c "source ~/.zshrc; python3 /home/ubuntu/shared/int_demo/gstreamer_usb_cam.py > /tmp/ros_monitor.log 2>&1 &"
 sleep 2
 

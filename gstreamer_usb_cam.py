@@ -5,6 +5,7 @@ import signal
 import config as cfg
 
 TO_IP_LIST = [
+    {"to_id": 0, "to_ip": "192.168.11.31"},
     {"to_id": 1, "to_ip": "10.100.30.21"},
     {"to_id": 2, "to_ip": "10.100.30.22"},
     {"to_id": 3, "to_ip": "10.100.30.23"},
