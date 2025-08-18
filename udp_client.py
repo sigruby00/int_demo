@@ -15,14 +15,10 @@ TO_IP_LIST = [
     {"to_id": 8, "to_ip": "10.100.30.28"}
 ]
 
-def udp_client(server_ip, server_port=5001, bitrate_mbps=15, duration=10, packet_size=1400):
+def udp_client(server_ip, server_port=5000, bitrate_mbps=15, duration=None, packet_size=1400):
     """
-    간단한 UDP 클라이언트 (iperf -c -u -b 15M 비슷)
-    server_ip: 수신 서버 주소
-    server_port: 수신 서버 포트
-    bitrate_mbps: 전송 속도 (Mbps)
-    duration: 전송 시간 (초)
-    packet_size: 패킷 크기 (바이트)
+    UDP 클라이언트 (iperf -c -u 처럼 동작)
+    duration=None 이면 무한 전송
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -32,23 +28,30 @@ def udp_client(server_ip, server_port=5001, bitrate_mbps=15, duration=10, packet
     interval = 1.0 / pps                   # 패킷 사이 간격 (초)
 
     print(f"Sending to {server_ip}:{server_port} at {bitrate_mbps} Mbps "
-          f"({pps:.0f} packets/sec, packet={packet_size} bytes, duration={duration}s)")
+          f"({pps:.0f} packets/sec, packet={packet_size} bytes, "
+          f"duration={'infinite' if duration is None else str(duration)+'s'})")
 
     payload = b'a' * packet_size
     sent_bytes = 0
     start = time.time()
 
-    while time.time() - start < duration:
-        sock.sendto(payload, (server_ip, server_port))
-        sent_bytes += len(payload)
-        time.sleep(interval)
+    try:
+        while True:
+            if duration is not None and (time.time() - start) >= duration:
+                break
+            sock.sendto(payload, (server_ip, server_port))
+            sent_bytes += len(payload)
+            time.sleep(interval)
 
-    elapsed = time.time() - start
-    rate_mbps = (sent_bytes * 8) / (elapsed * 1e6)
-    print(f"Done. Sent {sent_bytes} bytes in {elapsed:.2f} sec "
-          f"({rate_mbps:.2f} Mbps).")
+    except KeyboardInterrupt:
+        print("\nStopped by user (Ctrl+C).")
 
-    sock.close()
+    finally:
+        elapsed = time.time() - start
+        rate_mbps = (sent_bytes * 8) / (elapsed * 1e6)
+        print(f"Done. Sent {sent_bytes} bytes in {elapsed:.2f} sec "
+              f"({rate_mbps:.2f} Mbps).")
+        sock.close()
 
 
 if __name__ == "__main__":
@@ -56,4 +59,4 @@ if __name__ == "__main__":
     ip = next((item['to_ip'] for item in TO_IP_LIST if item['to_id'] == to_id), None)
     if ip is None:
         raise ValueError(f"Invalid to_id: {to_id}")
-    udp_client(ip, server_port=5001, bitrate_mbps=15, duration=10)
+    udp_client(ip, server_port=5001, bitrate_mbps=15, duration=None)
