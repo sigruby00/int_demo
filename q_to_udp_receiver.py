@@ -119,5 +119,3 @@ if __name__ == "__main__":
 
         if sio.connected:
             sio.emit('robot_pf_data', pf_data)
-
-                    f"(total={total_bytes} bytes, {rate_mbps:.2f} Mbps)")
