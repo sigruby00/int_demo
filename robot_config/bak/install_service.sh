@@ -36,23 +36,3 @@ sudo systemctl enable "$SERVICE_NAME"
 sudo systemctl start "$SERVICE_NAME"
 
 echo "[INFO] Service ${SERVICE_NAME} installed and started."
-
-
-# Checkt Service List
-# systemctl list-unit-files --type=service
-
-# Stop Service
-# sudo systemctl stop svrobot.service
-
-# Disable Service
-# sudo systemctl disable svrobot.service
-
-# Remove Service
-# sudo rm /etc/systemd/system/svrobot.service
-
-# MASK Service
-# sudo systemctl mask svrobot.service
-
-# Reset systemd
-# sudo systemctl daemon-reload
-# sudo systemctl reset-failed
