@@ -24,13 +24,13 @@ def reconnect_socket():
         try:
             if sio.connected:
                 sio.disconnect()
-            time.sleep(0.5)
+            time.sleep(3)
             sio.connect(SERVER_URL, auth={'to_id': str(to_id)})
             print("✅ Reconnected to server after handover.")
             return True
         except Exception as e:
             print(f"Reconnect attempt {i+1} failed: {e}")
-            time.sleep(2)
+            time.sleep(3)
     print("❌ Failed to reconnect after handover.")
     return False
 
@@ -39,7 +39,7 @@ def socketio_reconnect_watchdog():
         if not sio.connected:
             print("[Watchdog] Socket.IO not connected. Trying to reconnect...")
             reconnect_socket()
-        time.sleep(0.5)
+        time.sleep(3)
 
 def get_throughput(interval=5, iface=None):
     """
