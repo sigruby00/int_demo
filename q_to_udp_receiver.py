@@ -100,7 +100,7 @@ def disconnect():
 if __name__ == "__main__":
 
     threading.Thread(target=socketio_reconnect_watchdog, daemon=True).start()
-    udp_server(port=5001)
+    threading.Thread(target=udp_server, kwargs={'port': 5001}, daemon=True).start()
 
     iface = "wlp2s0"  # 모니터링할 인터페이스 (None이면 전체)
     interval = 5    # 5초 평균
@@ -114,7 +114,7 @@ if __name__ == "__main__":
             "timestamp": time_now,
             "data": {
                 "ca_id": to_id,
-                "throughput": rate_mbps
+                "throughput": recv
             }
         }
         print(pf_data)
