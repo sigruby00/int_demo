@@ -17,7 +17,8 @@ import config as cfg
 from config import ca_id, to_id, AP_INFO
 
 # 설정 상수
-SERVER_URL = "http://10.100.30.241:6789"
+# SERVER_URL = "http://10.100.30.241:6789" # JGN (NeuroRAT Server)
+SERVER_URL = "https://6b08ef0ec81e.ngrok.app" # ngrok
 USE_INTERFACE_ETH = "eth0"
 USE_INTERFACE_WLAN = "wlan0"
 CAMERA_DEVICE = "/dev/video0"

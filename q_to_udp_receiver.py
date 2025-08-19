@@ -4,8 +4,8 @@ import socket
 import time
 import socketio  # pip install "python-socketio[client]"
 
-SERVER_URL = 'http://10.100.30.241:6789'
-# SERVER_URL = 'http://10.100.30.241:6789' #ngrok ip
+# SERVER_URL = 'http://10.100.30.241:6789'
+SERVER_URL = "https://6b08ef0ec81e.ngrok.app" # ngrok
 
 to_id = 0 #same as ca_id
 
