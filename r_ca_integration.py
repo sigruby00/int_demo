@@ -242,8 +242,11 @@ def sensing_loop():
                     "connections": connections
                 }
             }
-            # print(json.dumps(sensing_data, indent=4))
-            sio.emit("robot_ss_data", json.dumps(sensing_data).encode())
+            print(json.dumps(sensing_data, indent=4))
+            if sio.connected:
+                sio.emit("robot_ss_data", json.dumps(sensing_data).encode())
+            else:
+                print("[Sensing] Socket.IO not connected. Skipping emit.")
             time.sleep(1.0)
         except Exception as e:
             print(f"[Sensing] error: {e}")
@@ -268,11 +271,11 @@ def scan_loop():
 def main():
     global camera, udpgen
     camera = CameraStreamer()
-    # udpgen = UDPGenerator()
+    udpgen = UDPGenerator()
 
     default_ip = get_ip_from_interface(USE_INTERFACE_ETH)
     camera.start(bind_ip=default_ip)
-    # udpgen.start()
+    udpgen.start()
 
     threading.Thread(target=sensing_loop, daemon=True).start()
     threading.Thread(target=scan_loop, daemon=True).start()
