@@ -3,17 +3,7 @@ import socket
 import time
 from config import to_id
 
-TO_IP_LIST = [
-    {"to_id": 0, "to_ip": "192.168.11.31"},
-    {"to_id": 1, "to_ip": "10.100.30.21"},
-    {"to_id": 2, "to_ip": "10.100.30.22"},
-    {"to_id": 3, "to_ip": "10.100.30.23"},
-    {"to_id": 4, "to_ip": "10.100.30.24"},
-    {"to_id": 5, "to_ip": "10.100.30.25"},
-    {"to_id": 6, "to_ip": "10.100.30.26"},
-    {"to_id": 7, "to_ip": "10.100.30.27"},
-    {"to_id": 8, "to_ip": "10.100.30.28"}
-]
+
 
 def udp_client(server_ip, server_port=5000, bitrate_mbps=15, duration=None, packet_size=1400):
     """

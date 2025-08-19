@@ -1,23 +1,10 @@
 #!/usr/bin/env python3
 import subprocess
 import signal
-
 import config as cfg
 
-TO_IP_LIST = [
-    {"to_id": 0, "to_ip": "192.168.11.31"},
-    {"to_id": 1, "to_ip": "10.100.30.21"},
-    {"to_id": 2, "to_ip": "10.100.30.22"},
-    {"to_id": 3, "to_ip": "10.100.30.23"},
-    {"to_id": 4, "to_ip": "10.100.30.24"},
-    {"to_id": 5, "to_ip": "10.100.30.25"},
-    {"to_id": 6, "to_ip": "10.100.30.26"},
-    {"to_id": 7, "to_ip": "10.100.30.27"},
-    {"to_id": 8, "to_ip": "10.100.30.28"}
-]
-
 def start_gstreamer(to_id):
-    to_ip = next((item['to_ip'] for item in TO_IP_LIST if item['to_id'] == to_id), None)
+    to_ip = next((item['to_ip'] for item in cfg.TO_IP_LIST if item['to_id'] == to_id), None)
     if to_ip is None:
         raise ValueError(f"Invalid to_id: {to_id}")
 

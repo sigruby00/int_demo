@@ -7,6 +7,7 @@ HEIGHT=480
 
 echo "🎥 Waiting for incoming H.264 stream on UDP port ${PORT} with size ${WIDTH}x${HEIGHT}..."
 
+
 gst-launch-1.0 -v \
   udpsrc port=$PORT caps="application/x-rtp, media=video, encoding-name=H264, payload=96" ! \
   rtph264depay ! \
