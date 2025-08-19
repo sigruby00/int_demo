@@ -78,10 +78,12 @@ def udp_server(host="0.0.0.0", port=5001, buffer_size=65535):
     클라이언트가 여러 번 실행되어도 매번 수신 가능.
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((host, port))
-    print(f"UDP server listening on {host}:{port}")
-
-
+    try:
+        sock.bind((host, port))
+        print(f"UDP server listening on {host}:{port}")
+        while True:
+            data, addr = sock.recvfrom(buffer_size)
+            # 필요하면 처리 로직 추가
     except KeyboardInterrupt:
         print("\nServer stopped by user.")
     finally:
