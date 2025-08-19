@@ -102,7 +102,7 @@ if __name__ == "__main__":
     threading.Thread(target=socketio_reconnect_watchdog, daemon=True).start()
     udp_server(port=5001)
 
-    iface = "eth0"  # 모니터링할 인터페이스 (None이면 전체)
+    iface = "wlp2s0"  # 모니터링할 인터페이스 (None이면 전체)
     interval = 5    # 5초 평균
 
     while True:
