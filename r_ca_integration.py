@@ -21,7 +21,7 @@ from config import ca_id, to_id, AP_INFO
 SERVER_URL = "https://6b08ef0ec81e.ngrok.app" # ngrok
 USE_INTERFACE_ETH = "eth0"
 USE_INTERFACE_WLAN = "wlan0"
-CAMERA_DEVICE = "/dev/video0"
+CAMERA_DEVICE = "/dev/video2"
 CAMERA_WIDTH = 1920
 CAMERA_HEIGHT = 1080
 CAMERA_FPS = 30
@@ -29,6 +29,8 @@ CAMERA_PORT = 5000
 UDP_PORT = 5001
 UDP_BITRATE_MBPS = 15.0
 TARGET_TO_IP = next((item['to_ip'] for item in cfg.TO_IP_LIST if item['to_id'] == to_id), None)
+
+print(TARGET_TO_IP)
 
 robot_id = ca_id
 scan_lock = threading.Lock()
@@ -42,16 +44,10 @@ udpgen = None
 
 # ----------- Network Interface Utils --------------
 def get_ip_from_interface(iface):
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        return socket.inet_ntoa(
-            struct.pack('256s', bytes(iface[:15], 'utf-8'))[20:24]
-        )
-    except Exception:
-        result = subprocess.getoutput(f"ip addr show dev {iface}")
-        for line in result.splitlines():
-            if "inet " in line:
-                return line.strip().split()[1].split("/")[0]
+    result = subprocess.getoutput(f"ip addr show dev {iface}")
+    for line in result.splitlines():
+        if "inet " in line:
+            return line.strip().split()[1].split("/")[0]
     return "0.0.0.0"
 
 # ----------- Camera Streamer ----------------------
@@ -63,11 +59,14 @@ class CameraStreamer:
     def start(self, bind_ip):
         self.stop()
         cmd = [
-            'gst-launch-1.0',
-            'v4l2src', f'device={CAMERA_DEVICE}',
-            '!', f'video/x-h264,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1',
-            '!', 'rtph264pay', 'config-interval=1', 'pt=96',
-            '!', f'udpsink host={TARGET_TO_IP} port={CAMERA_PORT} bind-address={bind_ip} sync=false async=false'
+            "gst-launch-1.0",
+            "v4l2src", f"device={CAMERA_DEVICE}",
+            "!",
+            f"video/x-h264,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1",
+            "!",
+            "rtph264pay", "config-interval=1", "pt=96",
+            "!",
+            "udpsink", f"host={TARGET_TO_IP}", f"port={CAMERA_PORT}", f"bind-address={bind_ip}"
         ]
         print(f"[Camera] launching: {' '.join(cmd)}")
         self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -243,11 +242,12 @@ def sensing_loop():
                     "connections": connections
                 }
             }
+            # print(json.dumps(sensing_data, indent=4))
             sio.emit("robot_ss_data", json.dumps(sensing_data).encode())
             time.sleep(1.0)
         except Exception as e:
             print(f"[Sensing] error: {e}")
-            time.sleep(1)
+            time.sleep(3)
 
 def scan_loop():
     while True:
@@ -256,8 +256,8 @@ def scan_loop():
             continue
         if scan_lock.acquire(blocking=False):
             try:
-                subprocess.run(["sudo", "wpa_cli", "scan"], check=True)
-                time.sleep(2.0)
+                subprocess.run(["sudo", "wpa_cli", "scan"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(3.0)
             except:
                 pass
             finally:
@@ -268,11 +268,11 @@ def scan_loop():
 def main():
     global camera, udpgen
     camera = CameraStreamer()
-    udpgen = UDPGenerator()
+    # udpgen = UDPGenerator()
 
     default_ip = get_ip_from_interface(USE_INTERFACE_ETH)
     camera.start(bind_ip=default_ip)
-    udpgen.start()
+    # udpgen.start()
 
     threading.Thread(target=sensing_loop, daemon=True).start()
     threading.Thread(target=scan_loop, daemon=True).start()
