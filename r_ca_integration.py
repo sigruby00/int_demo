@@ -91,32 +91,42 @@ class UDPGenerator(threading.Thread):
         self.packet_size = 1200
         self.interval = (self.packet_size * 8) / (UDP_BITRATE_MBPS * 1e6)
         self.lock = threading.Lock()
+        self.sock = None  # 소켓을 멤버로 유지
 
     def update(self, iface):
         with self.lock:
             self.iface = iface
-            # 새 인터페이스로 전환 → 기존 소켓 닫기 유도
-            if hasattr(self, "sock") and self.sock:
-                self.sock.close()
+            if self.sock:
+                try:
+                    self.sock.close()
+                except:
+                    pass
                 self.sock = None
 
     def run(self):
         while self.running:
             try:
                 with self.lock:
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    sock.setsockopt(socket.SOL_SOCKET, 25, bytes(f"{self.iface}\0", "utf-8"))
-                    sock.bind((get_ip_from_interface(self.iface), 0))
+                    if self.sock is None:
+                        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        self.sock.setsockopt(socket.SOL_SOCKET, 25, bytes(f"{self.iface}\0", "utf-8"))
+                        self.sock.bind((get_ip_from_interface(self.iface), 0))
+                        print(f"[UDP] New socket bound to {self.iface} ({get_ip_from_interface(self.iface)})")
+
                     dst = (TARGET_TO_IP, UDP_PORT)
-                while self.running:
-                    sock.sendto(os.urandom(self.packet_size), dst)
-                    time.sleep(self.interval)
+
+                # send loop
+                self.sock.sendto(os.urandom(self.packet_size), dst)
+                time.sleep(self.interval)
             except Exception as e:
                 print(f"[UDP] Error: {e}")
                 time.sleep(1)
 
     def stop(self):
         self.running = False
+        if self.sock:
+            self.sock.close()
+            self.sock = None
 
 # ----------- WiFi Functions -----------------------
 def get_current_bssid():
