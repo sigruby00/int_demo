@@ -69,7 +69,8 @@ class CameraStreamer:
             "udpsink", f"host={TARGET_TO_IP}", f"port={CAMERA_PORT}", f"bind-address={bind_ip}"
         ]
         print(f"[Camera] launching: {' '.join(cmd)}")
-        self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
     def stop(self):
         with self.lock:
@@ -94,6 +95,10 @@ class UDPGenerator(threading.Thread):
     def update(self, iface):
         with self.lock:
             self.iface = iface
+            # 새 인터페이스로 전환 → 기존 소켓 닫기 유도
+            if hasattr(self, "sock") and self.sock:
+                self.sock.close()
+                self.sock = None
 
     def run(self):
         while self.running:
@@ -166,8 +171,11 @@ def handover_ap(target_bssid):
         # ✅ 인터페이스 전환
         iface = USE_INTERFACE_WLAN
         new_ip = get_ip_from_interface(iface)
+        print(f"[HO] Camera bind_ip={new_ip}, UDP iface={iface}")
+
         camera.start(bind_ip=new_ip)
         udpgen.update(iface=iface)
+
 
     except Exception as e:
         print(f"[HO] Error during handover: {e}")
@@ -204,9 +212,9 @@ def command(data):
             print(f"[{robot_id}] Received handover request to BSSID: {target_bssid}")
             current_bssid = get_current_bssid()
 
-            if current_bssid == target_bssid:
-                print(f"[{robot_id}] Already connected to {current_bssid}. Skip HO.")
-                return
+            # if current_bssid == target_bssid:
+            #     print(f"[{robot_id}] Already connected to {current_bssid}. Skip HO.")
+            #     return
 
             if scan_lock.acquire(timeout=5):
                 try:
@@ -242,7 +250,7 @@ def sensing_loop():
                     "connections": connections
                 }
             }
-            print(json.dumps(sensing_data, indent=4))
+            # print(json.dumps(sensing_data, indent=4))
             if sio.connected:
                 sio.emit("robot_ss_data", json.dumps(sensing_data).encode())
             else:
