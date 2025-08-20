@@ -82,7 +82,9 @@ class CameraStreamer:
             "!",
             f"video/x-h264,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1",
             "!",
-            "h264parse", "rtph264pay", "config-interval=1", "pt=96",
+            "h264parse",
+            "!",
+            "rtph264pay", "config-interval=1", "pt=96",
             "!",
             "udpsink", f"host={TARGET_TO_IP}", f"port={CAMERA_PORT}", f"bind-address={bind_ip}"
         ]
