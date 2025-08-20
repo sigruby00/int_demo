@@ -191,8 +191,43 @@ def handover_ap(target_bssid):
         print(f"[HO] Error during handover: {e}")
 
 # ----------- Socket.IO ----------------------------
-sio = socketio.Client(reconnection=True, reconnection_attempts=0,
-                      reconnection_delay=0.1, reconnection_delay_max=0.5)
+sio = socketio.Client(
+    reconnection=True,
+    reconnection_attempts=0,
+    reconnection_delay=0.1,
+    reconnection_delay_max=0.5,
+)
+
+# Reconnect helper for socket.io
+is_connecting = False
+def reconnect_socket():
+    global is_connecting
+    if is_connecting:
+        return False
+    is_connecting = True
+    try:
+        for i in range(5):
+            try:
+                if sio.connected:
+                    return True  # 이미 연결돼 있으면 끝
+                sio.connect(SERVER_URL, auth={'to_id': str(to_id)})
+                print("✅ Reconnected to server after handover.")
+                return True
+            except Exception as e:
+                print(f"Reconnect attempt {i+1} failed: {e}")
+                time.sleep(3)
+        print("❌ Failed to reconnect after handover.")
+        return False
+    finally:
+        is_connecting = False
+
+def socketio_reconnect_watchdog():
+    while True:
+        if not sio.connected:
+            print("[Watchdog] Socket.IO not connected. Trying to reconnect...")
+            reconnect_socket()
+            time.sleep(10)  # 재시도 간격 늘려줌
+        time.sleep(3)
 
 @sio.event
 def connect():
@@ -235,6 +270,8 @@ def command(data):
 def sensing_loop():
     while True:
         try:
+            threading.Thread(target=socketio_reconnect_watchdog, daemon=True).start()
+
             cur_bssid = get_current_bssid()
             cur_ap_id = get_ap_id_from_bssid(cur_bssid)
             rssi_map = get_rssi_map_from_scan_results()
@@ -260,9 +297,10 @@ def sensing_loop():
                     "connections": connections
                 }
             }
-            # print(json.dumps(sensing_data, indent=4))
+            print(json.dumps(sensing_data, indent=4))
             if sio.connected:
-                sio.emit("robot_ss_data", json.dumps(sensing_data).encode())
+                # sio.emit("robot_ss_data", json.dumps(sensing_data).encode())
+                sio.emit("robot_ss_data", sensing_data)
             else:
                 print("[Sensing] Socket.IO not connected. Skipping emit.")
             time.sleep(1.0)
