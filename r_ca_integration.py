@@ -45,7 +45,7 @@ CAMERA_HEIGHT = 720
 CAMERA_FPS = 10
 CAMERA_PORT = 5000
 UDP_PORT = 5001
-UDP_BITRATE_MBPS = 10.0
+UDP_BITRATE_MBPS = 40.0
 TARGET_TO_IP = next((item['to_ip'] for item in TO_IP_LIST if item['to_id'] == to_id), None)
 
 print(TARGET_TO_IP)
