@@ -14,11 +14,29 @@ import socketio
 
 # 사용자 정의 config
 import config as cfg
-from config import ca_id, to_id, AP_INFO
+from config import ca_id, to_id
+
+AP_INFO = {
+    1: {'ap_id':1, 'bssid': 'ec:5a:31:99:ee:99'},
+    2: {'ap_id':2, 'bssid': 'ec:5a:31:a1:4a:a9'},
+    3: {'ap_id':3, 'bssid': '84:e8:cb:37:75:59'},
+}
+
+TO_IP_LIST = [
+    {"to_id": 2, "to_ip": "10.100.30.21"},
+    {"to_id": 3, "to_ip": "10.100.30.22"},
+    {"to_id": 4, "to_ip": "10.100.30.23"},
+    {"to_id": 5, "to_ip": "10.100.30.24"},
+    {"to_id": 6, "to_ip": "10.100.30.25"},
+    {"to_id": 7, "to_ip": "10.100.30.26"},
+    {"to_id": 8, "to_ip": "10.100.30.27"},
+    {"to_id": 9, "to_ip": "10.100.30.28"}
+]
+
 
 # 설정 상수
-# SERVER_URL = "http://10.100.30.241:6789" # JGN (NeuroRAT Server)
-SERVER_URL = "https://6b08ef0ec81e.ngrok.app" # ngrok
+SERVER_URL = "http://10.100.30.241:6789" # JGN (NeuroRAT Server)
+# SERVER_URL = "https://6b08ef0ec81e.ngrok.app" # ngrok
 USE_INTERFACE_ETH = "eth0"
 USE_INTERFACE_WLAN = "wlan0"
 CAMERA_DEVICE = "/dev/video2"
@@ -28,7 +46,7 @@ CAMERA_FPS = 30
 CAMERA_PORT = 5000
 UDP_PORT = 5001
 UDP_BITRATE_MBPS = 15.0
-TARGET_TO_IP = next((item['to_ip'] for item in cfg.TO_IP_LIST if item['to_id'] == to_id), None)
+TARGET_TO_IP = next((item['to_ip'] for item in TO_IP_LIST if item['to_id'] == to_id), None)
 
 print(TARGET_TO_IP)
 
