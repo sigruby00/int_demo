@@ -252,7 +252,7 @@ def reconnect_socket():
             try:
                 if sio.connected:
                     return True  # 이미 연결돼 있으면 끝
-                sio.connect(SERVER_URL, auth={'to_id': str(to_id)})
+                sio.connect(SERVER_URL, auth={'robot_id': str(robot_id)})
                 print("✅ Reconnected to server after handover.")
                 return True
             except Exception as e:
