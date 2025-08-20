@@ -88,16 +88,25 @@ class CameraStreamer:
         #     "!",
         #     "udpsink", f"host={TARGET_TO_IP}", f"port={CAMERA_PORT}", f"bind-address={bind_ip}"
         # ]
+        # cmd = [
+        #     "gst-launch-1.0",
+        #     "v4l2src", f"device={CAMERA_DEVICE}", "io-mode=2",   # DMA 기반 zero-copy
+        #     "!",
+        #     f"video/x-h264,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1",
+        #     "!",
+        #     "h264parse", "config-interval=1",   # SPS/PPS 주기적으로 삽입
+        #     "!",
+        #     "rtph264pay", "pt=96",
+        #     "!",
+        #     "udpsink", f"host={TARGET_TO_IP}", f"port={CAMERA_PORT}",
+        #             f"bind-address={bind_ip}", "sync=false", "async=false"
+        # ]
         cmd = [
             "gst-launch-1.0",
-            "v4l2src", f"device={CAMERA_DEVICE}", "io-mode=2",   # DMA 기반 zero-copy
-            "!",
+            "v4l2src", f"device={CAMERA_DEVICE}", "!",
             f"video/x-h264,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1",
             "!",
-            "h264parse", "config-interval=1",   # SPS/PPS 주기적으로 삽입
-            "!",
-            "rtph264pay", "pt=96",
-            "!",
+            "rtph264pay", "config-interval=1", "pt=96", "!",
             "udpsink", f"host={TARGET_TO_IP}", f"port={CAMERA_PORT}",
                     f"bind-address={bind_ip}", "sync=false", "async=false"
         ]
