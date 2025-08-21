@@ -123,15 +123,15 @@ class CameraStreamer:
         #             f"bind-address={bind_ip}", "sync=false"
         # ]
         #udp
-        cmd = [
+       cmd = [
             "gst-launch-1.0",
             "v4l2src", f"device={CAMERA_DEVICE}", "!",
             f"video/x-h264,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1",
             "!",
-            "h264parse", "!",
-            "queue", "!",
+            "h264parse", "config-interval=1", "!",
+            "rtph264pay", "config-interval=1", "pt=96", "!",
             "udpsink", f"host={TARGET_TO_IP}", f"port={CAMERA_PORT}",
-                    f"bind-address={bind_ip}", "sync=false", "async=false", "qos=false"
+                    f"bind-address={bind_ip}", "sync=false", "async=false"
         ]
 
         print(f"[Camera] launching: {' '.join(cmd)}")
