@@ -111,15 +111,31 @@ class CameraStreamer:
         #     "udpsink", f"host={TARGET_TO_IP}", f"port={CAMERA_PORT}",
         #             f"bind-address={bind_ip}", "sync=false"
         # ]
+        # cmd = [
+        #     "gst-launch-1.0",
+        #     "v4l2src", f"device={CAMERA_DEVICE}", "!",
+        #     f"video/x-h264,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1",
+        #     "!",
+        #     "h264parse", "!",
+        #     "rtph264pay", "config-interval=1", "pt=96", "!",
+        #     "udpsink", f"host={TARGET_TO_IP}", f"port={CAMERA_PORT}",
+        #             f"bind-address={bind_ip}", "sync=false"
+        # ]
+
         cmd = [
             "gst-launch-1.0",
             "v4l2src", f"device={CAMERA_DEVICE}", "!",
             f"video/x-h264,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1",
             "!",
-            "h264parse", "!",
-            "rtph264pay", "config-interval=1", "pt=96", "!",
-            "udpsink", f"host={TARGET_TO_IP}", f"port={CAMERA_PORT}",
-                    f"bind-address={bind_ip}", "sync=false"
+            "h264parse", "config-interval=1", "disable-passthrough=true", "!",
+            "rtph264pay", "config-interval=1", "pt=96", "aggregate-mode=zero", "!",
+            "udpsink",
+                f"host={TARGET_TO_IP}",
+                f"port={CAMERA_PORT}",
+                f"bind-address={bind_ip}",
+                "buffer-size=1000000",
+                "sync=false",
+                "async=false"
         ]
 
         print(f"[Camera] launching: {' '.join(cmd)}")
