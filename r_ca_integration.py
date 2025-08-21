@@ -81,22 +81,55 @@ def get_ip_from_interface(iface):
             return line.strip().split()[1].split("/")[0]
     return "0.0.0.0"
 
-def route_replace_host(dest_ip: str, iface: str):
-    """목적지 단일 IP를 지정 NIC로 라우트 강제"""
-    if not dest_ip or not iface:
-        return
-    cmd = ["sudo", "ip", "route", "replace", f"{dest_ip}/32", "dev", iface]
-    sh(cmd, check=False)
-    # 라우팅 결과 로그
-    got = sh(["ip", "route", "get", dest_ip], check=False, capture=True)
-    if got:
-        print(f"[ROUTE] {dest_ip} -> {got}")
-
 def host_from_url(url: str) -> str:
     try:
         return urlparse(url).hostname or ""
     except Exception:
         return ""
+
+def resolve_host_to_ip(host: str) -> str:
+    # host가 이미 IP면 그대로 반환
+    try:
+        socket.inet_aton(host)
+        return host
+    except OSError:
+        pass
+    # DNS → IPv4
+    try:
+        return socket.gethostbyname(host)
+    except Exception:
+        return host
+
+def get_gw_for_iface(iface: str) -> str:
+    """
+    해당 인터페이스의 default gateway(IP) 조회.
+    """
+    out = subprocess.getoutput("ip -4 route show default")
+    for line in out.splitlines():
+        # 예: "default via 10.100.30.1 dev eth0 proto dhcp ..."
+        if f" dev {iface} " in f" {line} " or line.strip().endswith(f" dev {iface}"):
+            parts = line.split()
+            if "via" in parts:
+                return parts[parts.index("via")+1]
+    return ""  # 게이트웨이 없으면 빈 문자열
+
+def route_replace_host(dest_ip: str, iface: str):
+    """
+    목적지 단일 IP를 지정 NIC로 라우트 강제.
+    - 게이트웨이가 있으면 via <gw> dev <iface>
+    - 같은 서브넷(직결)인 경우 scope link 로 on-link
+    """
+    if not dest_ip or not iface:
+        return
+    gw = get_gw_for_iface(iface)
+    if gw:
+        cmd = ["sudo", "ip", "route", "replace", f"{dest_ip}/32", "via", gw, "dev", iface]
+    else:
+        cmd = ["sudo", "ip", "route", "replace", f"{dest_ip}/32", "dev", iface, "scope", "link"]
+    sh(cmd, check=False)
+    got = sh(["ip", "route", "get", dest_ip], check=False, capture=True)
+    if got:
+        print(f"[ROUTE] {dest_ip} -> {got}")
 
 # ----------- Camera Streamer ----------------------
 class CameraStreamer:
@@ -390,8 +423,9 @@ def main():
 
     # 1) Socket.IO 서버 IP는 항상 eth0로 라우팅 고정
     server_host = host_from_url(SERVER_URL)
-    if server_host:
-        route_replace_host(server_host, USE_INTERFACE_ETH)
+    server_ip = resolve_host_to_ip(server_host) if server_host else ""
+    if server_ip:
+        route_replace_host(server_ip, USE_INTERFACE_ETH)
 
     # 2) 초기 스트림은 eth0 사용
     default_iface = USE_INTERFACE_ETH
