@@ -109,7 +109,7 @@ class CameraStreamer:
         #     "!",
         #     "rtph264pay", "config-interval=1", "pt=96", "!",
         #     "udpsink", f"host={TARGET_TO_IP}", f"port={CAMERA_PORT}",
-        #             f"bind-address={bind_ip}", "sync=false", "async=false"
+        #             f"bind-address={bind_ip}", "sync=false"
         # ]
         cmd = [
             "gst-launch-1.0",
@@ -117,9 +117,11 @@ class CameraStreamer:
             f"video/x-h264,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1",
             "!",
             "h264parse", "!",
+            "rtph264pay", "config-interval=1", "pt=96", "!",
             "udpsink", f"host={TARGET_TO_IP}", f"port={CAMERA_PORT}",
-                    f"bind-address={bind_ip}", "sync=false", "async=false"
+                    f"bind-address={bind_ip}", "sync=false"
         ]
+
         print(f"[Camera] launching: {' '.join(cmd)}")
         # self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
