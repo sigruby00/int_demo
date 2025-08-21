@@ -7,10 +7,10 @@ import time
 import json
 import socket
 import signal
+import struct
 import subprocess
 import threading
 import socketio
-from urllib.parse import urlparse
 
 # 사용자 정의 config
 import config as cfg
@@ -33,8 +33,10 @@ TO_IP_LIST = [
     {"to_id": 9, "to_ip": "10.100.30.28"}
 ]
 
+
 # 설정 상수
-SERVER_URL = "http://10.100.30.241:6789"  # JGN (NeuroRAT Server)
+SERVER_URL = "http://10.100.30.241:6789" # JGN (NeuroRAT Server)
+# SERVER_URL = "https://6b08ef0ec81e.ngrok.app" # ngrok
 USE_INTERFACE_ETH = "eth0"
 USE_INTERFACE_WLAN = "wlan0"
 CAMERA_DEVICE = "/dev/video2"
@@ -58,22 +60,7 @@ MOVING_AVG_N = 4
 camera = None
 udpgen = None
 
-# ----------- Utils --------------
-def sh(cmd: list, check=True, capture=False):
-    """작은 헬퍼: 쉘 커맨드 실행"""
-    try:
-        if capture:
-            out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
-            return out.strip()
-        else:
-            subprocess.run(cmd, check=check, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return ""
-    except subprocess.CalledProcessError as e:
-        print(f"[sh] error: {' '.join(cmd)}\n{e.output if hasattr(e, 'output') else e}")
-        if check:
-            raise
-        return ""
-
+# ----------- Network Interface Utils --------------
 def get_ip_from_interface(iface):
     result = subprocess.getoutput(f"ip addr show dev {iface}")
     for line in result.splitlines():
@@ -81,33 +68,49 @@ def get_ip_from_interface(iface):
             return line.strip().split()[1].split("/")[0]
     return "0.0.0.0"
 
-def route_replace_host(dest_ip: str, iface: str):
-    """목적지 단일 IP를 지정 NIC로 라우트 강제"""
-    if not dest_ip or not iface:
-        return
-    cmd = ["sudo", "ip", "route", "replace", f"{dest_ip}/32", "dev", iface]
-    sh(cmd, check=False)
-    # 라우팅 결과 로그
-    got = sh(["ip", "route", "get", dest_ip], check=False, capture=True)
-    if got:
-        print(f"[ROUTE] {dest_ip} -> {got}")
-
-def host_from_url(url: str) -> str:
-    try:
-        return urlparse(url).hostname or ""
-    except Exception:
-        return ""
-
 # ----------- Camera Streamer ----------------------
 class CameraStreamer:
     def __init__(self):
         self.proc = None
         self.lock = threading.Lock()
 
-    def start(self, iface, bind_ip):
+    def start(self, bind_ip):
         self.stop()
-        # 스트림 목적지 IP를 지정 인터페이스로 강제 라우팅
-        route_replace_host(TARGET_TO_IP, iface)
+        # cmd = [
+        #     "gst-launch-1.0",
+        #     "v4l2src", f"device={CAMERA_DEVICE}",
+        #     "!",
+        #     f"video/x-h264,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1",
+        #     "!",
+        #     "h264parse",
+        #     "!",
+        #     "rtph264pay", "config-interval=1", "pt=96",
+        #     "!",
+        #     "udpsink", f"host={TARGET_TO_IP}", f"port={CAMERA_PORT}", f"bind-address={bind_ip}"
+        # ]
+        # cmd = [
+        #     "gst-launch-1.0",
+        #     "v4l2src", f"device={CAMERA_DEVICE}", "io-mode=2",   # DMA 기반 zero-copy
+        #     "!",
+        #     f"video/x-h264,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1",
+        #     "!",
+        #     "h264parse", "config-interval=1",   # SPS/PPS 주기적으로 삽입
+        #     "!",
+        #     "rtph264pay", "pt=96",
+        #     "!",
+        #     "udpsink", f"host={TARGET_TO_IP}", f"port={CAMERA_PORT}",
+        #             f"bind-address={bind_ip}", "sync=false", "async=false"
+        # ]
+        # with RTP
+        # cmd = [
+        #     "gst-launch-1.0",
+        #     "v4l2src", f"device={CAMERA_DEVICE}", "!",
+        #     f"video/x-h264,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1",
+        #     "!",
+        #     "rtph264pay", "config-interval=1", "pt=96", "!",
+        #     "udpsink", f"host={TARGET_TO_IP}", f"port={CAMERA_PORT}",
+        #             f"bind-address={bind_ip}", "sync=false"
+        # ]
 
         cmd = [
             "gst-launch-1.0",
@@ -117,10 +120,11 @@ class CameraStreamer:
             "h264parse", "!",
             "rtph264pay", "config-interval=1", "pt=96", "!",
             "udpsink", f"host={TARGET_TO_IP}", f"port={CAMERA_PORT}",
-                       f"bind-address={bind_ip}", "sync=false"
+                    f"bind-address={bind_ip}", "sync=false"
         ]
         print(f"[Camera] launching: {' '.join(cmd)}")
-        self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
     def stop(self):
         with self.lock:
@@ -141,7 +145,7 @@ class UDPGenerator(threading.Thread):
         self.packet_size = 1200
         self.interval = (self.packet_size * 8) / (UDP_BITRATE_MBPS * 1e6)
         self.lock = threading.Lock()
-        self.sock = None  # 소켓 멤버 유지
+        self.sock = None  # 소켓을 멤버로 유지
 
     def update(self, iface):
         with self.lock:
@@ -159,7 +163,6 @@ class UDPGenerator(threading.Thread):
                 with self.lock:
                     if self.sock is None:
                         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                        # SO_BINDTODEVICE: 해당 NIC로 강제 송신
                         self.sock.setsockopt(socket.SOL_SOCKET, 25, bytes(f"{self.iface}\0", "utf-8"))
                         self.sock.bind((get_ip_from_interface(self.iface), 0))
                         print(f"[UDP] New socket bound to {self.iface} ({get_ip_from_interface(self.iface)})")
@@ -229,17 +232,14 @@ def handover_ap(target_bssid):
         print(f"Successfully handed over to BSSID: {target_bssid}")
         last_handover_time = time.time()
 
-        # ✅ 인터페이스 전환: WLAN 사용
+        # ✅ 인터페이스 전환
         iface = USE_INTERFACE_WLAN
         new_ip = get_ip_from_interface(iface)
         print(f"[HO] Camera bind_ip={new_ip}, UDP iface={iface}")
 
-        # 스트림 목적지 라우트 wlan0으로 강제
-        route_replace_host(TARGET_TO_IP, iface)
-
-        # 카메라/UDP 경로 전환
-        camera.start(iface=iface, bind_ip=new_ip)
+        camera.start(bind_ip=new_ip)
         udpgen.update(iface=iface)
+
 
     except Exception as e:
         print(f"[HO] Error during handover: {e}")
@@ -280,7 +280,7 @@ def socketio_reconnect_watchdog():
         if not sio.connected:
             print("[Watchdog] Socket.IO not connected. Trying to reconnect...")
             reconnect_socket()
-            time.sleep(10)
+            time.sleep(10)  # 재시도 간격 늘려줌
         time.sleep(3)
 
 @sio.event
@@ -295,43 +295,37 @@ def disconnect():
 def command(data):
     if data.get('robot_id') == str(robot_id):
         handover = data.get('handover')
-        if handover is None:
-            return
+        if handover:
+            handover_id = int(handover, 0)
 
-        try:
-            handover_id = int(handover)
-        except:
-            print(f"[CMD] invalid handover value: {handover}")
-            return
+            if handover_id == 0:
+                print(f"[{robot_id}] Handover ID is 0 → Use eth0, no Wi-Fi handover")
+                iface = USE_INTERFACE_ETH
+                local_ip = get_ip_from_interface(iface)
+                camera.start(bind_ip=local_ip)
+                udpgen.update(iface=iface)
+                return
 
-        if handover_id == 0:
-            # 유선으로 복귀
-            print(f"[{robot_id}] Handover ID is 0 → Use eth0, no Wi-Fi handover")
-            iface = USE_INTERFACE_ETH
-            local_ip = get_ip_from_interface(iface)
-            # 스트림 목적지 라우트 eth0으로 강제
-            route_replace_host(TARGET_TO_IP, iface)
-            camera.start(iface=iface, bind_ip=local_ip)
-            udpgen.update(iface=iface)
-            return
+            # Otherwise: perform Wi-Fi handover
+            target_bssid = AP_INFO[handover_id]['bssid'].lower()
+            print(f"[{robot_id}] Received handover request to BSSID: {target_bssid}")
+            current_bssid = get_current_bssid()
 
-        # Wi-Fi로 핸드오버
-        target_bssid = AP_INFO.get(handover_id, {}).get('bssid', '').lower()
-        if not target_bssid:
-            print(f"[CMD] unknown handover id: {handover_id}")
-            return
+            # if current_bssid == target_bssid:
+            #     print(f"[{robot_id}] Already connected to {current_bssid}. Skip HO.")
+            #     return
 
-        print(f"[{robot_id}] Received handover request to BSSID: {target_bssid}")
-
-        if scan_lock.acquire(timeout=5):
-            try:
-                handover_ap(target_bssid)  # 내부에서 wlan0로 전환 수행 + 라우트 강제
-            finally:
-                scan_lock.release()
+            if scan_lock.acquire(timeout=5):
+                try:
+                    handover_ap(target_bssid)  # 내부에서 wlan0로 전환 수행됨
+                finally:
+                    scan_lock.release()
 
 def sensing_loop():
     while True:
         try:
+            threading.Thread(target=socketio_reconnect_watchdog, daemon=True).start()
+
             cur_bssid = get_current_bssid()
             cur_ap_id = get_ap_id_from_bssid(cur_bssid)
             rssi_map = get_rssi_map_from_scan_results()
@@ -359,6 +353,7 @@ def sensing_loop():
             }
             print(json.dumps(sensing_data, indent=4))
             if sio.connected:
+                # sio.emit("robot_ss_data", json.dumps(sensing_data).encode())
                 sio.emit("robot_ss_data", sensing_data)
             else:
                 print("[Sensing] Socket.IO not connected. Skipping emit.")
@@ -388,25 +383,14 @@ def main():
     camera = CameraStreamer()
     udpgen = UDPGenerator()
 
-    # 1) Socket.IO 서버 IP는 항상 eth0로 라우팅 고정
-    server_host = host_from_url(SERVER_URL)
-    if server_host:
-        route_replace_host(server_host, USE_INTERFACE_ETH)
-
-    # 2) 초기 스트림은 eth0 사용
-    default_iface = USE_INTERFACE_ETH
-    default_ip = get_ip_from_interface(default_iface)
-    route_replace_host(TARGET_TO_IP, default_iface)
-    camera.start(iface=default_iface, bind_ip=default_ip)
+    default_ip = get_ip_from_interface(USE_INTERFACE_ETH)
+    camera.start(bind_ip=default_ip)
     udpgen.start()
 
-    # watchdog 스레드는 1회만 시작
-    threading.Thread(target=socketio_reconnect_watchdog, daemon=True).start()
     threading.Thread(target=sensing_loop, daemon=True).start()
     threading.Thread(target=scan_loop, daemon=True).start()
 
     try:
-        # Socket.IO 연결 (eth0 경로로 나감: host route로 보장)
         sio.connect(SERVER_URL, auth={"robot_id": str(robot_id)})
     except Exception as e:
         print(f"[SIO] initial connect failed: {e}")
