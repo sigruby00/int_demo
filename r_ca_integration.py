@@ -282,8 +282,8 @@ def handover_ap(target_bssid):
 sio = socketio.Client(
     reconnection=True,
     reconnection_attempts=0,
-    reconnection_delay=0.1,
-    reconnection_delay_max=0.5,
+    reconnection_delay=1,
+    reconnection_delay_max=5,
 )
 
 # Reconnect helper for socket.io
@@ -436,7 +436,7 @@ def main():
     udpgen.start()
 
     # watchdog 스레드는 1회만 시작
-    threading.Thread(target=socketio_reconnect_watchdog, daemon=True).start()
+    # threading.Thread(target=socketio_reconnect_watchdog, daemon=True).start()
     threading.Thread(target=sensing_loop, daemon=True).start()
     threading.Thread(target=scan_loop, daemon=True).start()
 
