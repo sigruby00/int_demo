@@ -18,7 +18,7 @@ from config import ca_id, to_id
 
 AP_INFO = {
     # 1: {'ap_id':1, 'bssid': 'ec:5a:31:99:ee:99'},
-    1: {'ap_id':1, 'bssid': '96:5A:31:5D:62:92'},
+    1: {'ap_id':1, 'bssid': '96:5a:31:5d:62:92'},
     2: {'ap_id':2, 'bssid': 'ec:5a:31:a1:4a:a9'},
     3: {'ap_id':3, 'bssid': '84:e8:cb:37:75:59'},
 }
