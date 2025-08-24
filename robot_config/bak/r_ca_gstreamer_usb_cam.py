@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 import subprocess
 import signal
-import config as cfg
+# import config as cfg
 
 TO_IP_LIST = [
-    {"to_id": 2, "to_ip": "10.100.30.21"},
+    {"to_id": 2, "to_ip": "192.168.11.68"},
     {"to_id": 3, "to_ip": "10.100.30.22"},
     {"to_id": 4, "to_ip": "10.100.30.23"},
     {"to_id": 5, "to_ip": "10.100.30.24"},
@@ -19,6 +19,8 @@ def start_gstreamer(to_id):
     to_ip = next((item['to_ip'] for item in TO_IP_LIST if item['to_id'] == to_id), None)
     if to_ip is None:
         raise ValueError(f"Invalid to_id: {to_id}")
+
+    print(to_ip)
 
     gst_cmd = [
         'gst-launch-1.0',

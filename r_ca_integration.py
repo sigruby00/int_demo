@@ -39,12 +39,12 @@ SERVER_URL = "http://10.100.30.241:6789"  # JGN (NeuroRAT Server)
 USE_INTERFACE_ETH = "eth0"
 USE_INTERFACE_WLAN = "wlan0"
 CAMERA_DEVICE = "/dev/video2"
-CAMERA_WIDTH = 1280
-CAMERA_HEIGHT = 720
-CAMERA_FPS = 15
+CAMERA_WIDTH = 1920
+CAMERA_HEIGHT = 1080
+CAMERA_FPS = 30
 CAMERA_PORT = 5000
 UDP_PORT = 6001
-UDP_BITRATE_MBPS = 0.1
+UDP_BITRATE_MBPS = 1.0
 TARGET_TO_IP = next((item['to_ip'] for item in TO_IP_LIST if item['to_id'] == to_id), None)
 
 print(TARGET_TO_IP)
@@ -396,10 +396,10 @@ def sensing_loop():
                 sio.emit("robot_ss_data", sensing_data)
             else:
                 print("[Sensing] Socket.IO not connected. Skipping emit.")
-            time.sleep(1.0)
+            time.sleep(10.0)
         except Exception as e:
             print(f"[Sensing] error: {e}")
-            time.sleep(3)
+            time.sleep(10)
 
 def scan_loop():
     while True:
@@ -409,7 +409,7 @@ def scan_loop():
         if scan_lock.acquire(blocking=False):
             try:
                 subprocess.run(["sudo", "wpa_cli", "scan"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                time.sleep(3.0)
+                time.sleep(10.0)
             except:
                 pass
             finally:
@@ -447,7 +447,7 @@ def main():
         print(f"[SIO] initial connect failed: {e}")
 
     while True:
-        time.sleep(5)
+        time.sleep(10)
 
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, lambda s, f: sys.exit(0))
