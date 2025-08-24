@@ -364,23 +364,12 @@ def command(data):
                 scan_lock.release()
 
 def sensing_loop():
-    INTERVAL = 10.0
-    global rssi_history
-
     while True:
-        start = time.time()
         try:
             cur_bssid = get_current_bssid()
             cur_ap_id = get_ap_id_from_bssid(cur_bssid)
+            rssi_map = get_rssi_map_from_scan_results()
 
-            # ✅ scan_results 호출 제거 → rssi_history 기반으로만 사용
-            rssi_map = {}
-            for bssid, history in rssi_history.items():
-                if history:
-                    avg = sum(history) / len(history)
-                    rssi_map[bssid.lower()] = avg
-
-            # 연결 상태 매핑
             connections = [
                 {
                     "gateway_id": gw_id,
@@ -392,7 +381,6 @@ def sensing_loop():
             ]
 
             if all(conn["connected"] == "false" for conn in connections):
-                # 연결 없으면 skip
                 time.sleep(1.0)
                 continue
 
@@ -403,22 +391,15 @@ def sensing_loop():
                     "connections": connections
                 }
             }
-
             print(json.dumps(sensing_data, indent=4))
-
             if sio.connected:
-                # ✅ emit 비동기 (callback=None) → 블로킹 방지
-                sio.emit("robot_ss_data", sensing_data, callback=None)
+                sio.emit("robot_ss_data", sensing_data)
             else:
                 print("[Sensing] Socket.IO not connected. Skipping emit.")
-
+            time.sleep(10.0)
         except Exception as e:
             print(f"[Sensing] error: {e}")
-
-        # ✅ 경과 시간 보정 sleep → 정확히 10초 주기 유지
-        elapsed = time.time() - start
-        time.sleep(max(0, INTERVAL - elapsed))
-
+            time.sleep(10)
 
 def scan_loop():
     while True:
@@ -427,14 +408,8 @@ def scan_loop():
             continue
         if scan_lock.acquire(blocking=False):
             try:
-                # ✅ 주기를 랜덤하게 20~30초로 → sensing과 decouple
-                subprocess.run(
-                    ["sudo", "wpa_cli", "scan"],
-                    check=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                time.sleep(20.0 + (10.0 * (time.time() % 1)))  # 20~30초 랜덤 효과
+                subprocess.run(["sudo", "wpa_cli", "scan"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(10.0)
             except:
                 pass
             finally:
