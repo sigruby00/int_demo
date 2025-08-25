@@ -33,7 +33,7 @@ def start_gstreamer(to_id):
     return subprocess.Popen(gst_cmd, stdin=subprocess.PIPE)
 
 def main():
-    to_id = 2
+    to_id = 6
     gst_proc = start_gstreamer(to_id)
 
     try:
