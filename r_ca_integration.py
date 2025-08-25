@@ -31,11 +31,13 @@ TO_IP_LIST = [
     {"to_id": 6, "to_ip": "10.100.30.25"},
     {"to_id": 7, "to_ip": "10.100.30.26"},
     {"to_id": 8, "to_ip": "10.100.30.27"},
-    {"to_id": 9, "to_ip": "10.100.30.28"}
+    {"to_id": 9, "to_ip": "10.100.30.28"},
+    {"to_id": 10, "to_ip": "10.100.30.21"}
 ]
 
 # 설정 상수
-SERVER_URL = "http://10.100.30.241:6789"  # JGN (NeuroRAT Server)
+# SERVER_URL = "http://10.100.30.241:6789"  # JGN (NeuroRAT Server)
+SERVER_URL = "https://877fe9913d2c.ngrok.app" # JGN (NeuroRAT Server)
 USE_INTERFACE_ETH = "eth0"
 USE_INTERFACE_WLAN = "wlan0"
 CAMERA_DEVICE = "/dev/video2"
@@ -46,6 +48,12 @@ CAMERA_PORT = 5000
 UDP_PORT = 6001
 UDP_BITRATE_MBPS = 15.0
 TARGET_TO_IP = next((item['to_ip'] for item in TO_IP_LIST if item['to_id'] == to_id), None)
+
+# 설정 상수 아래쪽 아무 데나 추가
+GW_OVERRIDE = {
+    "wlan0": "192.168.101.1",   # wlan0은 이 GW로 강제
+    "eth0": "192.168.11.1",    # 필요하면 다른 인터페이스도 지정 가능
+}
 
 print(TARGET_TO_IP)
 
@@ -114,19 +122,29 @@ def get_gw_for_iface(iface: str) -> str:
                 return parts[parts.index("via")+1]
     return ""  # 게이트웨이 없으면 빈 문자열
 
+
 def route_replace_host(dest_ip: str, iface: str):
     """
     목적지 단일 IP를 지정 NIC로 라우트 강제.
-    - 게이트웨이가 있으면 via <gw> dev <iface>
-    - 같은 서브넷(직결)인 경우 scope link 로 on-link
+    - iface에 대한 GW 오버라이드가 있으면 그걸 via로 사용
+    - 없으면 해당 iface의 default gateway를 탐색
+    - 둘 다 없으면 on-link 전송(scope link)
     """
     if not dest_ip or not iface:
         return
-    gw = get_gw_for_iface(iface)
+
+    # ① 오버라이드 우선
+    gw = GW_OVERRIDE.get(iface, "")
+
+    # ② 오버라이드 없으면 시스템 라우팅 테이블에서 GW 추출
+    if not gw:
+        gw = get_gw_for_iface(iface)
+
     if gw:
         cmd = ["sudo", "ip", "route", "replace", f"{dest_ip}/32", "via", gw, "dev", iface]
     else:
         cmd = ["sudo", "ip", "route", "replace", f"{dest_ip}/32", "dev", iface, "scope", "link"]
+
     sh(cmd, check=False)
     got = sh(["ip", "route", "get", dest_ip], check=False, capture=True)
     if got:
@@ -254,29 +272,117 @@ def get_rssi_map_from_scan_results():
                 continue
     return rssi_map
 
+# def handover_ap(target_bssid):
+#     global last_handover_time, camera, udpgen
+#     try:
+#         subprocess.run(["sudo", "wpa_cli", "roam", target_bssid], check=True)
+#         subprocess.run(["sudo", "wpa_cli", "set_network", "0", "bssid", target_bssid], check=True)
+#         subprocess.run(["sudo", "wpa_cli", "set_network", "0", "bgscan", ""], check=True)
+#         print(f"Successfully handed over to BSSID: {target_bssid}")
+#         last_handover_time = time.time()
+
+#         # ✅ 인터페이스 전환: WLAN 사용
+#         iface = USE_INTERFACE_WLAN
+#         new_ip = get_ip_from_interface(iface)
+#         print(f"[HO] Camera bind_ip={new_ip}, UDP iface={iface}")
+
+#         # 스트림 목적지 라우트 wlan0으로 강제
+#         route_replace_host(TARGET_TO_IP, iface)
+
+#         # 카메라/UDP 경로 전환
+#         camera.start(iface=iface, bind_ip=new_ip)
+#         udpgen.update(iface=iface)
+
+#     except Exception as e:
+#         print(f"[HO] Error during handover: {e}")
+
+# def handover_ap(target_bssid):
+#     global last_handover_time, camera, udpgen
+#     try:
+#         # roam 시도
+#         print(f"[HO] Trying roam → {target_bssid}")
+#         res = subprocess.run(["sudo", "wpa_cli", "roam", target_bssid], capture_output=True, text=True)
+#         print(f"[HO] roam stdout: {res.stdout}, stderr: {res.stderr}, return={res.returncode}")
+#         res.check_returncode()
+#         subprocess.run(["sudo", "wpa_cli", "set_network", "0", "bssid", target_bssid], check=True)
+#         subprocess.run(["sudo", "wpa_cli", "set_network", "0", "bgscan", ""], check=True)
+
+#         # ✅ 실제로 target_bssid 로 붙을 때까지 확인 (최대 8초 대기)
+#         for i in range(8):
+#             cur_bssid = get_current_bssid()
+#             if cur_bssid and cur_bssid.lower() == target_bssid.lower():
+#                 print(f"✅ Connected to {target_bssid}")
+#                 break
+#             time.sleep(1)
+#         else:
+#             print(f"❌ Handover to {target_bssid} failed (timeout)")
+#             return
+
+#         last_handover_time = time.time()
+#         print(f"Successfully handed over to BSSID: {target_bssid}")
+
+#         # ✅ 인터페이스 전환: WLAN 사용
+#         iface = USE_INTERFACE_WLAN
+#         new_ip = get_ip_from_interface(iface)
+#         print(f"[HO] Camera bind_ip={new_ip}, UDP iface={iface}")
+
+#         # 스트림 목적지 라우트 wlan0으로 강제
+#         route_replace_host(TARGET_TO_IP, iface)
+
+#         # 카메라/UDP 경로 전환
+#         camera.start(iface=iface, bind_ip=new_ip)
+#         udpgen.update(iface=iface)
+
+#     except Exception as e:
+#         print(f"[HO] Error during handover: {e}")
+
 def handover_ap(target_bssid):
     global last_handover_time, camera, udpgen
     try:
+        print(f"[HO] Trying roam → {target_bssid}")
         subprocess.run(["sudo", "wpa_cli", "roam", target_bssid], check=True)
         subprocess.run(["sudo", "wpa_cli", "set_network", "0", "bssid", target_bssid], check=True)
         subprocess.run(["sudo", "wpa_cli", "set_network", "0", "bgscan", ""], check=True)
-        print(f"Successfully handed over to BSSID: {target_bssid}")
+
+        # ✅ 연결 확인 루프
+        success = False
+        for i in range(10):  # 최대 10초 대기
+            cur_bssid = get_current_bssid()
+            if cur_bssid and cur_bssid.lower() == target_bssid.lower():
+                success = True
+                break
+            time.sleep(1)
+
+        if not success:
+            print(f"❌ Handover to {target_bssid} failed (timeout)")
+            return
+
+        print(f"✅ Handover completed to {target_bssid}")
         last_handover_time = time.time()
 
-        # ✅ 인터페이스 전환: WLAN 사용
-        iface = USE_INTERFACE_WLAN
-        new_ip = get_ip_from_interface(iface)
-        print(f"[HO] Camera bind_ip={new_ip}, UDP iface={iface}")
+        # ✅ IP 확인 대기 (DHCP 환경이면 더 길게 필요)
+        new_ip = None
+        for i in range(10):
+            new_ip = get_ip_from_interface(USE_INTERFACE_WLAN)
+            if new_ip and new_ip != "0.0.0.0":
+                break
+            time.sleep(1)
 
-        # 스트림 목적지 라우트 wlan0으로 강제
-        route_replace_host(TARGET_TO_IP, iface)
+        if not new_ip:
+            print(f"⚠️ Got BSSID {target_bssid}, but no IP on wlan0 yet")
+            return
 
-        # 카메라/UDP 경로 전환
-        camera.start(iface=iface, bind_ip=new_ip)
-        udpgen.update(iface=iface)
+        print(f"[HO] Camera bind_ip={new_ip}, UDP iface={USE_INTERFACE_WLAN}")
+
+        # 라우트 및 경로 전환
+        route_replace_host(TARGET_TO_IP, USE_INTERFACE_WLAN)
+        camera.start(iface=USE_INTERFACE_WLAN, bind_ip=new_ip)
+        udpgen.update(iface=USE_INTERFACE_WLAN)
 
     except Exception as e:
         print(f"[HO] Error during handover: {e}")
+
+
 
 # ----------- Socket.IO ----------------------------
 sio = socketio.Client(
@@ -357,11 +463,25 @@ def command(data):
 
         print(f"[{robot_id}] Received handover request to BSSID: {target_bssid}")
 
+        # if scan_lock.acquire(timeout=5):
+        #     try:
+        #         print(f"[{robot_id}] Starting handover_ap() ...")
+        #         handover_ap(target_bssid)
+        #     finally:
+        #         scan_lock.release()
+        # else:
+        #     print(f"[{robot_id}] ⚠️ Skipped handover (scan_lock busy)")
+
         if scan_lock.acquire(timeout=5):
             try:
-                handover_ap(target_bssid)  # 내부에서 wlan0로 전환 수행 + 라우트 강제
+                print(f"[{robot_id}] Starting handover_ap() ...")
+                handover_ap(target_bssid)
             finally:
                 scan_lock.release()
+        else:
+            print(f"[{robot_id}] ⚠️ Scan loop busy, forcing handover anyway")
+            # 락 못 잡아도 handover는 강제로 실행
+            handover_ap(target_bssid)
 
 def sensing_loop():
     while True:
