@@ -36,8 +36,8 @@ TO_IP_LIST = [
 ]
 
 # 설정 상수
-# SERVER_URL = "http://10.100.30.241:6789"  # JGN (NeuroRAT Server)
-SERVER_URL = "https://877fe9913d2c.ngrok.app" # JGN (NeuroRAT Server)
+SERVER_URL = "http://10.100.30.241:6789"  # JGN (NeuroRAT Server)
+# SERVER_URL = "https://877fe9913d2c.ngrok.app" # JGN (NeuroRAT Server)
 USE_INTERFACE_ETH = "eth0"
 USE_INTERFACE_WLAN = "wlan0"
 CAMERA_DEVICE = "/dev/video2"
