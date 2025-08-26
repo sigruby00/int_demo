@@ -569,11 +569,20 @@ def main():
     threading.Thread(target=sensing_loop, daemon=True).start()
     threading.Thread(target=scan_loop, daemon=True).start()
 
-    try:
-        # Socket.IO 연결 (eth0 경로로 나감: host route로 보장)
-        sio.connect(SERVER_URL, auth={"robot_id": str(robot_id)})
-    except Exception as e:
-        print(f"[SIO] initial connect failed: {e}")
+    # try:
+    #     # Socket.IO 연결 (eth0 경로로 나감: host route로 보장)
+    #     sio.connect(SERVER_URL, auth={"robot_id": str(robot_id)})
+    # except Exception as e:
+    #     print(f"[SIO] initial connect failed: {e}")
+
+    # ✅ 서버 연결 무한 재시도 (초기 연결 실패 대비)
+    while not sio.connected:
+        try:
+            sio.connect(SERVER_URL, auth={"robot_id": str(robot_id)})
+            print("✅ Connected to server")
+        except Exception as e:
+            print(f"[SIO] initial connect failed: {e}")
+            time.sleep(5)
 
     while True:
         time.sleep(10)
