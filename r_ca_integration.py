@@ -432,6 +432,15 @@ def disconnect():
     print('❌ Disconnected from server')
 
 @sio.event
+def reboot(data):
+    if data.get('robot_id') == str(robot_id):
+        print(f"[CMD] 🔁 Reboot command received for robot_id={robot_id}")
+        try:
+            subprocess.run(["sudo", "reboot"])
+        except Exception as e:
+            print(f"[CMD] ⚠️ Failed to reboot: {e}")
+
+@sio.event
 def command(data):
     if data.get('robot_id') == str(robot_id):
         handover = data.get('handover')
