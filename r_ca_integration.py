@@ -42,12 +42,12 @@ SERVER_URL = "http://10.100.30.241:6789"  # JGN (NeuroRAT Server)
 USE_INTERFACE_ETH = "eth0"
 USE_INTERFACE_WLAN = "wlan0"
 CAMERA_DEVICE = "/dev/video2"
-CAMERA_WIDTH = 1920
-CAMERA_HEIGHT = 1080
+CAMERA_WIDTH = 1280
+CAMERA_HEIGHT = 720
 CAMERA_FPS = 30
 CAMERA_PORT = 5000
 UDP_PORT = 6001
-UDP_BITRATE_MBPS = 75.0
+UDP_BITRATE_MBPS = 85.0
 TARGET_TO_IP = next((item['to_ip'] for item in TO_IP_LIST if item['to_id'] == to_id), None)
 
 # 설정 상수 아래쪽 아무 데나 추가
