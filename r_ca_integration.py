@@ -349,7 +349,7 @@ def reconnect_socket():
         # 단발로 1회 트라이 (실패하면 watchdog이 다음 backoff 주기 때 다시 호출)
         print("[Reconnect] trying to connect...")
         # sio.connect(SERVER_URL, auth={'robot_id': str(robot_id)})
-        sio.connect(SERVER_URL, auth={'type': 'robot', 'id': str(robot_id)})
+        sio.connect(SERVER_URL, transports=["websocket"], auth={'type': 'robot', 'id': str(robot_id)})
         print("✅ Connected to server")
     except Exception as e:
         print(f"[Reconnect] failed: {e}")
@@ -386,9 +386,19 @@ def keepalive_ping_loop():
             print(f"[Keepalive] error: {e}")
         time.sleep(20)
 
+# @sio.event
+# def connect():
+#     print('✅ Connected to server')
+
 @sio.event
 def connect():
     print('✅ Connected to server')
+    time.sleep(1)  # 서버 핸드셰이크 대기
+    try:
+        sio.emit("robot_keepalive", {"robot_id": str(robot_id), "ts": int(time.time())})
+        print("[Init] Sent initial keepalive")
+    except Exception as e:
+        print(f"[Init] keepalive emit failed: {e}")
 
 @sio.event
 def disconnect():
@@ -525,6 +535,9 @@ def scan_loop():
 # ----------- MAIN ----------------------------
 def main():
     global camera, udpgen
+    # 4) 최초 연결 (실패 시 watchdog이 책임짐)
+    reconnect_socket()
+
     camera = CameraStreamer()
     udpgen = UDPGenerator()
 
@@ -547,8 +560,7 @@ def main():
     threading.Thread(target=sensing_loop, daemon=True).start()
     threading.Thread(target=scan_loop, daemon=True).start()
 
-    # 4) 최초 연결 (실패 시 watchdog이 책임짐)
-    reconnect_socket()
+
 
     # 5) 메인 루프 유지
     while True:
