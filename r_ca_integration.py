@@ -44,7 +44,7 @@ USE_INTERFACE_WLAN = "wlan0"
 CAMERA_DEVICE = "/dev/video2"
 CAMERA_WIDTH = 1280
 CAMERA_HEIGHT = 720
-CAMERA_FPS = 30
+CAMERA_FPS = 15
 CAMERA_PORT = 5000
 UDP_PORT = 6001
 UDP_BITRATE_MBPS = 85.0
@@ -168,10 +168,21 @@ class CameraStreamer:
             f"video/x-h264,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1",
             "!",
             "h264parse", "!",
-            "rtph264pay", "config-interval=1", "pt=96", "!",
+            "rtph264pay", "config-interval=10", "pt=96", "!",
             "udpsink", f"host={TARGET_TO_IP}", f"port={CAMERA_PORT}",
                        f"bind-address={bind_ip}", "sync=false"
         ]
+        #   cmd = [
+        #     "gst-launch-1.0",
+        #     "v4l2src", f"device={CAMERA_DEVICE}", "!",
+        #     f"video/x-h264,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1",
+        #     "!",
+        #     "h264parse", "!",
+        #     "rtph264pay", "config-interval=10", "pt=96", "mtu=1400", "!",  # config-interval 줄이기
+        #     "udpsink", f"host={TARGET_TO_IP}", f"port={CAMERA_PORT}",
+        #                 f"bind-address={bind_ip}", "sync=false", "async=false"  # async=false 추가
+        # ]
+
         print(f"[Camera] launching: {' '.join(cmd)}")
         self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
