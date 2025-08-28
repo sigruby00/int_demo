@@ -348,7 +348,8 @@ def reconnect_socket():
     try:
         # 단발로 1회 트라이 (실패하면 watchdog이 다음 backoff 주기 때 다시 호출)
         print("[Reconnect] trying to connect...")
-        sio.connect(SERVER_URL, auth={'robot_id': str(robot_id)})
+        # sio.connect(SERVER_URL, auth={'robot_id': str(robot_id)})
+        sio.connect(SERVER_URL, auth={'type': 'robot', 'id': str(robot_id)})
         print("✅ Connected to server")
     except Exception as e:
         print(f"[Reconnect] failed: {e}")
