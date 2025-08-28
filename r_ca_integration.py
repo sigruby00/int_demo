@@ -47,7 +47,7 @@ CAMERA_HEIGHT = 720
 CAMERA_FPS = 15
 CAMERA_PORT = 5000
 UDP_PORT = 6001
-UDP_BITRATE_MBPS = 85
+UDP_BITRATE_MBPS = 1.0
 TARGET_TO_IP = next((item['to_ip'] for item in TO_IP_LIST if item['to_id'] == to_id), None)
 
 # 설정 상수 아래쪽 아무 데나 추가
