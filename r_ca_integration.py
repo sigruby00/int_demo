@@ -48,7 +48,7 @@ CAMERA_HEIGHT = 720
 CAMERA_FPS = 30
 CAMERA_PORT = 5000
 UDP_PORT = 6001
-UDP_BITRATE_MBPS = 50.0
+UDP_BITRATE_MBPS = 15.0
 TARGET_TO_IP = next((item['to_ip'] for item in TO_IP_LIST if item['to_id'] == to_id), None)
 
 # 인터페이스별 GW 오버라이드
