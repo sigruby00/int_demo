@@ -18,14 +18,20 @@ import config as cfg
 from config import ca_id, to_id
 
 AP_INFO = {
-    # 1: {'ap_id':1, 'bssid': 'ec:5a:31:99:ee:99'},
-    # 1: {'ap_id':1, 'bssid': '96:5a:31:5d:62:92'},
-    1: {'ap_id':1, 'bssid': '20:23:51:55:0f:77'},  # home IP
+    1: {'ap_id':1, 'bssid': 'ec:5a:31:99:ee:99'},
     2: {'ap_id':2, 'bssid': 'ec:5a:31:a1:4a:a9'},
-    3: {'ap_id':3, 'bssid': '84:e8:cb:37:75:59'},
+    3: {'ap_id':3, 'bssid': '84:e8:cb:37:75:59'}, # previous nict demo (yrp)
+    # 1: {'ap_id':1, 'bssid': '96:5a:31:5d:62:92'},
+    # 1: {'ap_id':1, 'bssid': '20:23:51:55:0f:77'},  # home IP,previous nict demo (yrp)
+    # 2: {'ap_id':2, 'bssid': 'ec:5a:31:a1:4a:a9'}, # previous nict demo (yrp)
+    # 3: {'ap_id':3, 'bssid': '84:e8:cb:37:75:59'}, # previous nict demo (yrp)
+    # 1: {'ap_id':1, 'bssid': '84:E8:CB:83:86:A2'},  #  ap 0
+    # 2: {'ap_id':2, 'bssid': '84:E8:CB:3A:C5:62'},  #  ap 1
+    # 3: {'ap_id':3, 'bssid': 'F0:F8:4A:D2:DC:E2'},  #  ap 1
 }
 
 TO_IP_LIST = [
+    # previous nict demo (yrp)
     {"to_id": 2, "to_ip": "10.100.30.21"},
     {"to_id": 3, "to_ip": "10.100.30.22"},
     {"to_id": 4, "to_ip": "10.100.30.23"},
@@ -34,7 +40,7 @@ TO_IP_LIST = [
     {"to_id": 7, "to_ip": "10.100.30.26"},
     {"to_id": 8, "to_ip": "10.100.30.27"},
     {"to_id": 9, "to_ip": "10.100.30.28"},
-    {"to_id": 10, "to_ip": "10.100.30.21"}
+    # {"to_id": 10, "to_ip": "10.100.30.21"}
 ]
 
 # 설정 상수
@@ -48,7 +54,7 @@ CAMERA_HEIGHT = 720
 CAMERA_FPS = 30
 CAMERA_PORT = 5000
 UDP_PORT = 6001
-UDP_BITRATE_MBPS = 15.0
+UDP_BITRATE_MBPS = 10.0
 TARGET_TO_IP = next((item['to_ip'] for item in TO_IP_LIST if item['to_id'] == to_id), None)
 
 # 인터페이스별 GW 오버라이드
@@ -538,7 +544,7 @@ def main():
     # 4) 최초 연결 (실패 시 watchdog이 책임짐)
     reconnect_socket()
 
-    camera = CameraStreamer()
+    # camera = CameraStreamer()
     udpgen = UDPGenerator()
 
     # 1) Socket.IO 서버 IP는 항상 eth0로 라우팅 고정
@@ -551,7 +557,7 @@ def main():
     default_iface = USE_INTERFACE_ETH
     default_ip = get_ip_from_interface(default_iface)
     route_replace_host(TARGET_TO_IP, default_iface)
-    camera.start(iface=default_iface, bind_ip=default_ip)
+    # camera.start(iface=default_iface, bind_ip=default_ip)
     udpgen.start()
 
     # 3) 백그라운드 스레드 시작
@@ -559,8 +565,6 @@ def main():
     threading.Thread(target=keepalive_ping_loop, daemon=True).start()
     threading.Thread(target=sensing_loop, daemon=True).start()
     threading.Thread(target=scan_loop, daemon=True).start()
-
-
 
     # 5) 메인 루프 유지
     while True:
