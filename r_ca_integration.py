@@ -62,7 +62,6 @@ GW_OVERRIDE = {
     "wlan0": "192.168.101.1",   # wlan0은 이 GW로 강제
     "eth0": "192.168.11.1",     # 필요하면 다른 인터페이스도 지정 가능
 }
-
 print(TARGET_TO_IP)
 
 robot_id = ca_id
@@ -230,8 +229,12 @@ class UDPGenerator(threading.Thread):
 
                     dst = (TARGET_TO_IP, UDP_PORT)
 
+                timestamp = time.time()
+                ts_bytes = struct.pack('!d', timestamp)
+                payload = ts_bytes + os.urandom(self.packet_size - 8)
                 # send loop
-                self.sock.sendto(os.urandom(self.packet_size), dst)
+                self.sock.sendto(payload, dst)
+                # self.sock.sendto(os.urandom(self.packet_size), dst)
                 time.sleep(self.interval)
             except Exception as e:
                 print(f"[UDP] Error: {e}")
