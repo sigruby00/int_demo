@@ -10,6 +10,7 @@ import struct
 import signal
 import base64
 import urllib.request
+import urllib.parse
 import subprocess
 import threading
 import random
@@ -524,6 +525,15 @@ def _webnav_post(path, payload, timeout=8.0):
             return {"ok": True}
 
 
+def _webnav_delete(path, timeout=8.0):
+    req = urllib.request.Request(WEBNAV_URL + path, method="DELETE")
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        try:
+            return json.loads(r.read().decode("utf-8"))
+        except Exception:
+            return {"ok": True}
+
+
 def _compact_status():
     """Trim webnav /api/state to a small payload for the dashboard."""
     s = _webnav_get_json("/api/state")
@@ -585,6 +595,8 @@ _NAV_ROUTES = {
     "replay_start":  lambda d: ("/api/replay/start",  {"name": d.get("name"), "loop": d.get("loop", True)}),
     "replay_stop":   lambda d: ("/api/replay/stop",   {}),
     "stop":          lambda d: ("/api/stop",          {}),
+    "add_waypoint":  lambda d: ("/api/waypoints",     {k: d[k] for k in ("name", "x", "y") if k in d}),
+    "save_route":    lambda d: ("/api/route",         {"route": d.get("route", [])}),
 }
 
 
@@ -594,12 +606,25 @@ def nav_command(data):
     if not isinstance(data, dict) or str(data.get("robot_id")) != str(robot_id):
         return
     action = data.get("action")
+    ok, detail = True, None
+    # delete uses HTTP DELETE, handled separately from the POST route table
+    if action == "del_waypoint":
+        try:
+            res = _webnav_delete("/api/waypoints/" + urllib.parse.quote(str(data.get("name", ""))))
+            ok, detail = bool(res.get("ok", True)), res.get("error")
+        except Exception as e:
+            ok, detail = False, str(e)
+        print(f"[Nav] del_waypoint ok={ok}")
+        try:
+            sio.emit("nav_ack", {"robot_id": str(robot_id), "action": action, "ok": ok, "detail": detail})
+        except Exception:
+            pass
+        return
     route = _NAV_ROUTES.get(action)
     if not route:
         print(f"[Nav] unknown action: {action}")
         return
     path, payload = route(data)
-    ok, detail = True, None
     try:
         res = _webnav_post(path, payload)
         ok = bool(res.get("ok", True))
@@ -610,6 +635,31 @@ def nav_command(data):
     try:
         sio.emit("nav_ack", {"robot_id": str(robot_id), "action": action,
                              "ok": ok, "detail": detail})
+    except Exception:
+        pass
+
+
+_GET_ROUTES = {
+    "waypoints": "/api/waypoints",
+    "route":     "/api/route",
+}
+
+
+@sio.event
+def get_request(data):
+    """Dashboard nav-config asks for robot data (waypoints/route); reply with robot_data."""
+    if not isinstance(data, dict) or str(data.get("robot_id")) != str(robot_id):
+        return
+    what = data.get("what")
+    path = _GET_ROUTES.get(what)
+    if not path:
+        return
+    try:
+        payload = _webnav_get_json(path)
+    except Exception as e:
+        payload = {"error": str(e)}
+    try:
+        sio.emit("robot_data", {"robot_id": str(robot_id), "what": what, "data": payload})
     except Exception:
         pass
 
