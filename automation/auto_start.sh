@@ -52,4 +52,21 @@ if ! tmux has-session -t robot_web 2>/dev/null; then
     "cd $REPO_HOST && while true; do python3 webnav/web/server.py; echo '[WARN] web crashed, restart in 3s'; sleep 3; done" C-m
 fi
 
+# --- 5) auto-load navigation with the default map --------------------------
+# Bring up nav2+AMCL automatically (once webnav is serving) so remote
+# set_pose / goal / mission work without a manual "Load nav". select_map does
+# a clean container restart + launches navigation as the sole ROS graph.
+setsid bash -c '
+  for i in $(seq 1 40); do
+    dm=$(curl -s http://127.0.0.1:8081/api/maps 2>/dev/null \
+         | python3 -c "import sys,json;print(json.load(sys.stdin).get(\"default\") or \"\")" 2>/dev/null)
+    if [ -n "$dm" ]; then
+      curl -s -X POST -H "Content-Type: application/json" \
+           -d "{\"name\":\"$dm\"}" http://127.0.0.1:8081/api/map >/dev/null 2>&1
+      break
+    fi
+    sleep 2
+  done
+' >/tmp/auto_load_nav.log 2>&1 < /dev/null &
+
 echo "[INFO] Done. Web UI on http://<robot-ip>:8081"
