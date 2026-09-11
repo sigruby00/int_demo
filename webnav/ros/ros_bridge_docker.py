@@ -86,7 +86,12 @@ class CommandReceiver(Node):
         self.cmd_vel = self.create_publisher(Twist, CMD_VEL_TOPIC, 30)
         self.initpose_pub = self.create_publisher(
             PoseWithCovarianceStamped, "/initialpose", 10)
-        self.nav_client = ActionClient(self, NavigateToPose, "navigate_to_pose")
+        # Created lazily on the first nav goal: the NavigateToPose action server
+        # only exists once navigation (nav2) is launched. Building the ActionClient
+        # up-front can fail ("context invalid") on a stock-bringup graph or when
+        # Fast-DDS shared memory is stale, which would kill the whole bridge and
+        # take teleop + telemetry down with it. Lazy creation keeps the bridge up.
+        self.nav_client = None
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("0.0.0.0", COMMAND_PORT))
         threading.Thread(target=self._recv_loop, daemon=True).start()
@@ -136,6 +141,12 @@ class CommandReceiver(Node):
         self.get_logger().info(f"set initial pose ({x:.2f}, {y:.2f}, {yaw:.2f})")
 
     def _send_goal(self, x, y, yaw=0.0):
+        if self.nav_client is None:
+            try:
+                self.nav_client = ActionClient(self, NavigateToPose, "navigate_to_pose")
+            except Exception as e:
+                self.get_logger().warn(f"could not create nav action client: {e}")
+                return
         if not self.nav_client.wait_for_server(timeout_sec=2.0):
             self.get_logger().warn("navigate_to_pose action server not available")
             return
