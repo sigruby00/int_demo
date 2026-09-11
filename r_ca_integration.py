@@ -600,12 +600,60 @@ _NAV_ROUTES = {
 }
 
 
+_seq_stop = threading.Event()
+
+
+def _exec_sequence(steps):
+    """Run a teleop choreography: a list of {linear, angular, duration} steps,
+    republishing drive every 0.3s (cmd_vel timeout) then stopping."""
+    _seq_stop.clear()
+    try:
+        for s in steps:
+            if _seq_stop.is_set():
+                break
+            lin = float(s.get("linear", 0.0))
+            ang = float(s.get("angular", 0.0))
+            dur = float(s.get("duration", 0.0))
+            t_end = time.time() + dur
+            while time.time() < t_end and not _seq_stop.is_set():
+                try:
+                    _webnav_post("/api/drive", {"linear": lin, "angular": ang})
+                except Exception:
+                    pass
+                time.sleep(0.3)
+    finally:
+        try:
+            _webnav_post("/api/stop", {})
+        except Exception:
+            pass
+
+
+@sio.event
+def run_sequence(data):
+    """Dashboard demo: execute a timed teleop sequence (robot_id-filtered)."""
+    if not isinstance(data, dict) or str(data.get("robot_id")) != str(robot_id):
+        return
+    steps = data.get("steps") or []
+    print(f"[Seq] run_sequence: {len(steps)} steps")
+    threading.Thread(target=_exec_sequence, args=(steps,), daemon=True).start()
+
+
+@sio.event
+def stop_sequence(data):
+    if isinstance(data, dict) and str(data.get("robot_id")) not in (str(robot_id), "None"):
+        return
+    _seq_stop.set()
+    print("[Seq] stop_sequence")
+
+
 @sio.event
 def nav_command(data):
     """Forward a nav action from the dashboard to the local webnav server."""
     if not isinstance(data, dict) or str(data.get("robot_id")) != str(robot_id):
         return
     action = data.get("action")
+    if action == "stop":
+        _seq_stop.set()          # also halt any running choreography
     ok, detail = True, None
     # delete uses HTTP DELETE, handled separately from the POST route table
     if action == "del_waypoint":
