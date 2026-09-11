@@ -590,7 +590,7 @@ _NAV_ROUTES = {
     "load_map":      lambda d: ("/api/map",           {"name": d.get("name")}),
     "goto":          lambda d: ("/api/goto",          {k: d[k] for k in ("x", "y", "yaw", "name") if k in d}),
     "set_pose":      lambda d: ("/api/set_pose",      {"x": d.get("x", 0.0), "y": d.get("y", 0.0), "yaw": d.get("yaw", 0.0)}),
-    "mission_start": lambda d: ("/api/mission/start", {"route": d.get("route")} if d.get("route") else {}),
+    "mission_start": lambda d: ("/api/mission/start", {**({"route": d["route"]} if d.get("route") else {}), "loop": bool(d.get("loop", False))}),
     "mission_stop":  lambda d: ("/api/mission/stop",  {}),
     "replay_start":  lambda d: ("/api/replay/start",  {"name": d.get("name"), "loop": d.get("loop", True)}),
     "replay_stop":   lambda d: ("/api/replay/stop",   {}),

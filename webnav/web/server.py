@@ -298,7 +298,7 @@ def api_route_save():
 def api_mission_start():
     d = request.get_json(force=True, silent=True) or {}
     route = d.get("route") or settings.load_route()
-    ok, msg = control.start_mission(route)
+    ok, msg = control.start_mission(route, bool(d.get("loop", False)))
     return jsonify({"ok": ok, "route": msg if ok else None, "error": None if ok else msg})
 
 

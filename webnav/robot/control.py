@@ -22,7 +22,7 @@ class Control:
         self._last_drive = 0.0
         # mission (ordered waypoint route) state
         self._mission = {"running": False, "route": [], "index": -1,
-                         "target": None, "message": "idle"}
+                         "target": None, "loop": False, "lap": 0, "message": "idle"}
         self._mission_stop = threading.Event()
 
     # ---- teleop ----------------------------------------------------------
@@ -76,8 +76,10 @@ class Control:
     def mission_status(self):
         return dict(self._mission)
 
-    def start_mission(self, names):
-        """Navigate through the given saved-waypoint names, in order."""
+    def start_mission(self, names, loop=False):
+        """Navigate through the given saved-waypoint names, in order.
+
+        loop=True repeats the route continuously until stop_mission()."""
         if self._mission["running"]:
             return False, "mission already running"
         wps = settings.load_waypoints()
@@ -86,8 +88,10 @@ class Control:
             return False, "no valid waypoints in route"
         self._mission_stop.clear()
         self._mission.update({"running": True, "route": route, "index": -1,
-                              "target": None, "message": "starting"})
-        threading.Thread(target=self._mission_loop, args=(route,), daemon=True).start()
+                              "target": None, "loop": bool(loop), "lap": 0,
+                              "message": "starting"})
+        threading.Thread(target=self._mission_loop, args=(route, bool(loop)),
+                         daemon=True).start()
         return True, route
 
     def stop_mission(self):
@@ -96,24 +100,31 @@ class Control:
         self._mission.update({"running": False, "message": "stopped"})
         return True
 
-    def _mission_loop(self, route):
+    def _mission_loop(self, route, loop=False):
         wps = settings.load_waypoints()
-        for i, name in enumerate(route):
-            if self._mission_stop.is_set():
-                break
-            wp = wps.get(name)
-            if not wp:
-                continue
-            self._mission.update({"index": i, "target": name,
-                                  "message": f"going to {name} ({i+1}/{len(route)})"})
-            self.goto_xy(wp["x"], wp["y"])
-            if not self._wait_arrival(wp["x"], wp["y"]):
+        lap = 0
+        while not self._mission_stop.is_set():
+            lap += 1
+            self._mission["lap"] = lap
+            for i, name in enumerate(route):
                 if self._mission_stop.is_set():
                     break
-                self._mission.update({"message": f"timeout at {name}, continuing"})
-                continue
-            self._mission.update({"message": f"reached {name}"})
-            time.sleep(1.0)     # brief dwell at each waypoint
+                wp = wps.get(name)
+                if not wp:
+                    continue
+                tag = f" (lap {lap})" if loop else ""
+                self._mission.update({"index": i, "target": name,
+                                      "message": f"going to {name} ({i+1}/{len(route)}){tag}"})
+                self.goto_xy(wp["x"], wp["y"])
+                if not self._wait_arrival(wp["x"], wp["y"]):
+                    if self._mission_stop.is_set():
+                        break
+                    self._mission.update({"message": f"timeout at {name}, continuing"})
+                    continue
+                self._mission.update({"message": f"reached {name}"})
+                time.sleep(1.0)     # brief dwell at each waypoint
+            if not loop:
+                break
         done = not self._mission_stop.is_set()
         self._mission.update({"running": False, "target": None,
                               "message": "route complete" if done else "stopped"})
