@@ -54,6 +54,7 @@ def api_state():
         "roam": sensing.roam_status(),
         "mission": control.mission_status(),
         "current_map": control.current_map(),
+        "default_map": control.default_map(),
         "maps": control.list_maps(),
         "camera": camera.available,
         "recorder": recorder.status(),
@@ -209,7 +210,8 @@ def _map_meta(name):
 
 @app.route("/api/maps")
 def api_maps():
-    return jsonify({"maps": control.list_maps(), "current": control.current_map()})
+    return jsonify({"maps": control.list_maps(), "current": control.current_map(),
+                    "default": control.default_map()})
 
 
 @app.route("/api/map_meta/<name>")

@@ -170,3 +170,11 @@ class Control:
 
     def current_map(self):
         return self._current_map
+
+    def default_map(self):
+        """Preferred map preselected in the web nav dropdown. Uses
+        settings.DEFAULT_MAP when it exists, else the first available map."""
+        maps = self.list_maps()
+        if settings.DEFAULT_MAP in maps:
+            return settings.DEFAULT_MAP
+        return maps[0] if maps else None

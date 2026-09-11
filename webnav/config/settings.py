@@ -77,6 +77,9 @@ DOCKER_NAME = "MentorPi"
 ROS_WS = "/home/ubuntu/ros2_ws"
 # Maps live in the docker workspace (synced from ./config/maps on boot).
 MAPS_DIR = os.path.join(BASE_DIR, "config", "maps")
+# Default SLAM map: preselected in the web nav dropdown so "Load nav" uses it by
+# default. Falls back to the first available map if this one isn't present.
+DEFAULT_MAP = "yrp2_4f"
 
 # ---- camera (local preview only, no server streaming) --------------------
 CAMERA_DEVICE = "/dev/video0"

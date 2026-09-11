@@ -337,6 +337,7 @@ function refreshState() {
         const o = document.createElement("option"); o.value = o.textContent = m; sel.append(o);
       });
       sel.dataset.n = String((s.maps || []).length);
+      if (s.default_map && (s.maps || []).includes(s.default_map)) sel.value = s.default_map;
       if ((s.maps || []).length && window.mapLoad) window.mapLoad(sel.value);
     }
     // handover: current connection + roam mode
