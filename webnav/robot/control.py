@@ -101,41 +101,52 @@ class Control:
         return True
 
     def _mission_loop(self, route, loop=False):
-        wps = settings.load_waypoints()
         lap = 0
-        while not self._mission_stop.is_set():
-            lap += 1
-            self._mission["lap"] = lap
-            for i, name in enumerate(route):
-                if self._mission_stop.is_set():
-                    break
-                wp = wps.get(name)
-                if not wp:
-                    continue
-                tag = f" (lap {lap})" if loop else ""
-                self._mission.update({"index": i, "target": name,
-                                      "message": f"going to {name} ({i+1}/{len(route)}){tag}"})
-                self.goto_xy(wp["x"], wp["y"])
-                if not self._wait_arrival(wp["x"], wp["y"]):
+        try:
+            while not self._mission_stop.is_set():
+                lap += 1
+                self._mission["lap"] = lap
+                wps = settings.load_waypoints()          # reload each lap
+                for i, name in enumerate(route):
                     if self._mission_stop.is_set():
                         break
-                    self._mission.update({"message": f"timeout at {name}, continuing"})
-                    continue
-                self._mission.update({"message": f"reached {name}"})
-                time.sleep(1.0)     # brief dwell at each waypoint
-            if not loop:
-                break
-        done = not self._mission_stop.is_set()
-        self._mission.update({"running": False, "target": None,
-                              "message": "route complete" if done else "stopped"})
+                    wp = wps.get(name)
+                    if not wp:
+                        continue
+                    tag = f" (lap {lap})" if loop else ""
+                    self._mission.update({"index": i, "target": name,
+                                          "message": f"going to {name} ({i+1}/{len(route)}){tag}"})
+                    try:
+                        self.goto_xy(wp["x"], wp["y"])
+                        arrived = self._wait_arrival(wp["x"], wp["y"])
+                    except Exception as e:                # never let one hop kill the loop
+                        self._mission.update({"message": f"error at {name}: {e}"})
+                        arrived = False
+                    if not arrived:
+                        if self._mission_stop.is_set():
+                            break
+                        self._mission.update({"message": f"timeout at {name}, continuing"})
+                        continue
+                    self._mission.update({"message": f"reached {name}"})
+                    time.sleep(1.0)     # brief dwell at each waypoint
+                if not loop:
+                    break
+        except Exception as e:
+            self._mission.update({"message": f"mission error: {e}"})
+        finally:
+            done = not self._mission_stop.is_set()
+            self._mission.update({"running": False, "target": None,
+                                  "message": "route complete" if done else "stopped"})
 
     def _wait_arrival(self, gx, gy):
         t0 = time.time()
         while time.time() - t0 < WAYPOINT_TIMEOUT:
             if self._mission_stop.is_set():
                 return False
-            st = self.bridge.get_state()
-            if ((st["x"] - gx) ** 2 + (st["y"] - gy) ** 2) ** 0.5 <= ARRIVE_RADIUS:
+            st = self.bridge.get_state() or {}
+            x, y = st.get("x"), st.get("y")
+            if x is not None and y is not None and \
+               ((x - gx) ** 2 + (y - gy) ** 2) ** 0.5 <= ARRIVE_RADIUS:
                 return True
             time.sleep(0.4)
         return False
