@@ -65,6 +65,15 @@ class Camera:
                        + frame + b"\r\n")
             time.sleep(1.0 / max(1, settings.CAMERA_FPS))
 
+    def snapshot(self):
+        """Return the latest captured JPEG frame (bytes), or None if unavailable.
+
+        Used for the central dashboard's on-demand photo (no streaming): the
+        capture loop already keeps the most recent frame, so this is cheap.
+        """
+        with self._lock:
+            return self._frame
+
     def stop(self):
         self._running = False
         if self._cap is not None:

@@ -8,6 +8,8 @@ import json
 import socket
 import struct
 import signal
+import base64
+import urllib.request
 import subprocess
 import threading
 import random
@@ -47,6 +49,8 @@ TO_IP_LIST = [
 # 설정 상수
 SERVER_URL = "http://10.100.30.241:6789"  # JGN (NeuroRAT Server)
 # SERVER_URL = "https://877fe9913d2c.ngrok.app" # JGN (NeuroRAT Server)
+WEBNAV_URL = "http://127.0.0.1:8081"      # local webnav web server (per-Pi UI)
+STATUS_PERIOD_S = 3.0                      # compact telemetry push to central dashboard
 USE_INTERFACE_ETH = "eth0"
 USE_INTERFACE_WLAN = "wlan0"
 CAMERA_DEVICE = "/dev/video2"
@@ -485,6 +489,146 @@ def command(data):
     except Exception as e:
         print(f"[CMD] handler error: {e}")
 
+# ===========================================================================
+# Central dashboard bridge
+# ---------------------------------------------------------------------------
+# The rich robot state (pose/battery/maps/mission/camera) lives in the local
+# webnav web server (:8081), not in this process. We poll a COMPACT summary
+# and push it over the existing socket.io link (~every 3s), answer snapshot
+# requests with a single JPEG (no streaming), forward nav commands to webnav,
+# and run code-update+restart on demand. All server->robot events are filtered
+# by robot_id, matching the existing reboot/command handlers.
+# ===========================================================================
+REPO_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _webnav_get_json(path, timeout=3.0):
+    with urllib.request.urlopen(WEBNAV_URL + path, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def _webnav_get_bytes(path, timeout=5.0):
+    with urllib.request.urlopen(WEBNAV_URL + path, timeout=timeout) as r:
+        return r.read()
+
+
+def _webnav_post(path, payload, timeout=8.0):
+    body = json.dumps(payload or {}).encode("utf-8")
+    req = urllib.request.Request(WEBNAV_URL + path, data=body,
+                                 headers={"Content-Type": "application/json"},
+                                 method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        try:
+            return json.loads(r.read().decode("utf-8"))
+        except Exception:
+            return {"ok": True}
+
+
+def _compact_status():
+    """Trim webnav /api/state to a small payload for the dashboard."""
+    s = _webnav_get_json("/api/state")
+    st = s.get("state", {}) or {}
+    sen = s.get("sensing", {}) or {}
+    mis = s.get("mission", {}) or {}
+    rep = (s.get("recorder", {}) or {}).get("replay", {}) or {}
+    return {
+        "robot_id": str(robot_id),
+        "ts": int(time.time()),
+        "pose": {"x": st.get("x"), "y": st.get("y"), "yaw": st.get("yaw")},
+        "battery": st.get("battery"),
+        "net": {"ap_id": sen.get("connected_ap_id"), "bssid": sen.get("connected_bssid")},
+        "current_map": s.get("current_map"),
+        "default_map": s.get("default_map"),
+        "maps": s.get("maps", []),
+        "mission": {"running": mis.get("running"), "message": mis.get("message"),
+                    "index": mis.get("index")},
+        "replay": {"running": rep.get("running"), "name": rep.get("name"),
+                   "lap": rep.get("lap")},
+        "camera": s.get("camera"),
+    }
+
+
+def status_forward_loop():
+    """Push a compact status to the central dashboard every STATUS_PERIOD_S."""
+    while True:
+        try:
+            if sio.connected:
+                sio.emit("robot_status", _compact_status())
+        except Exception as e:
+            print(f"[Status] forward error: {e}")
+        time.sleep(STATUS_PERIOD_S)
+
+
+@sio.event
+def snapshot_request(data):
+    """Server asks for a single photo -> grab one JPEG from webnav, send base64."""
+    if not isinstance(data, dict) or str(data.get("robot_id")) != str(robot_id):
+        return
+    try:
+        jpg = _webnav_get_bytes("/camera/snapshot")
+        sio.emit("robot_snapshot", {
+            "robot_id": str(robot_id), "ts": int(time.time()),
+            "jpg_b64": base64.b64encode(jpg).decode("ascii"),
+        })
+        print(f"[Snapshot] sent ({len(jpg)} bytes)")
+    except Exception as e:
+        print(f"[Snapshot] failed: {e}")
+
+
+# nav action -> (webnav path, payload builder)
+_NAV_ROUTES = {
+    "load_map":      lambda d: ("/api/map",           {"name": d.get("name")}),
+    "goto":          lambda d: ("/api/goto",          {k: d[k] for k in ("x", "y", "yaw", "name") if k in d}),
+    "set_pose":      lambda d: ("/api/set_pose",      {"x": d.get("x", 0.0), "y": d.get("y", 0.0), "yaw": d.get("yaw", 0.0)}),
+    "mission_start": lambda d: ("/api/mission/start", {"route": d.get("route")} if d.get("route") else {}),
+    "mission_stop":  lambda d: ("/api/mission/stop",  {}),
+    "replay_start":  lambda d: ("/api/replay/start",  {"name": d.get("name"), "loop": d.get("loop", True)}),
+    "replay_stop":   lambda d: ("/api/replay/stop",   {}),
+    "stop":          lambda d: ("/api/stop",          {}),
+}
+
+
+@sio.event
+def nav_command(data):
+    """Forward a nav action from the dashboard to the local webnav server."""
+    if not isinstance(data, dict) or str(data.get("robot_id")) != str(robot_id):
+        return
+    action = data.get("action")
+    route = _NAV_ROUTES.get(action)
+    if not route:
+        print(f"[Nav] unknown action: {action}")
+        return
+    path, payload = route(data)
+    ok, detail = True, None
+    try:
+        res = _webnav_post(path, payload)
+        ok = bool(res.get("ok", True))
+        detail = res.get("error") or res.get("detail")
+    except Exception as e:
+        ok, detail = False, str(e)
+    print(f"[Nav] {action} -> {path} ok={ok}")
+    try:
+        sio.emit("nav_ack", {"robot_id": str(robot_id), "action": action,
+                             "ok": ok, "detail": detail})
+    except Exception:
+        pass
+
+
+@sio.event
+def update_restart(data):
+    """Pull latest code and restart the whole stack (detached, survives kill)."""
+    if not isinstance(data, dict) or str(data.get("robot_id")) != str(robot_id):
+        return
+    script = os.path.join(REPO_DIR, "automation", "update_restart.sh")
+    print(f"[CMD] update+restart requested -> {script}")
+    try:
+        log = open("/tmp/update_restart.log", "ab")
+        subprocess.Popen(["/bin/bash", script], stdout=log, stderr=log,
+                         start_new_session=True)   # detach so it outlives us
+    except Exception as e:
+        print(f"[CMD] update_restart failed to launch: {e}")
+
+
 # ----------- Sensing & Scan -----------------------
 def sensing_loop():
     while True:
@@ -569,6 +713,7 @@ def main():
     threading.Thread(target=keepalive_ping_loop, daemon=True).start()
     threading.Thread(target=sensing_loop, daemon=True).start()
     threading.Thread(target=scan_loop, daemon=True).start()
+    threading.Thread(target=status_forward_loop, daemon=True).start()  # central dashboard
 
     # 5) 메인 루프 유지
     while True:

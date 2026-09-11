@@ -370,6 +370,15 @@ def camera_stream():
                     mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
+@app.route("/camera/snapshot")
+def camera_snapshot():
+    """Single latest JPEG frame (for the central dashboard's on-demand photo)."""
+    jpg = camera.snapshot()
+    if not jpg:
+        return jsonify({"ok": False, "error": "no frame"}), 503
+    return Response(jpg, mimetype="image/jpeg")
+
+
 def _start_workers():
     sensing.start()
     usb_joy.start()
