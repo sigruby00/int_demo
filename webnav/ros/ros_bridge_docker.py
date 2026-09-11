@@ -170,8 +170,11 @@ def main():
     executor.add_node(CommandReceiver())
     try:
         executor.spin()
+    except KeyboardInterrupt:
+        pass
     finally:
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":
