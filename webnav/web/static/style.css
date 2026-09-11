@@ -1,0 +1,121 @@
+:root {
+  --bg: #0f1115; --card: #181b22; --line: #262b36;
+  --fg: #e7eaf0; --muted: #8b93a3; --accent: #4c8dff; --danger: #ff5468;
+  --ok: #38d39f;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+header {
+  padding: 14px 18px; border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+}
+h1 { font-size: 18px; margin: 0; }
+.rid { color: var(--accent); }
+h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.status { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip {
+  background: var(--card); border: 1px solid var(--line); border-radius: 999px;
+  padding: 4px 10px; font-size: 12px; color: var(--muted);
+}
+.chip.off { color: var(--muted); }
+.chip.on { color: var(--ok); border-color: var(--ok); }
+.idset {
+  display: flex; gap: 6px; align-items: center;
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 999px; padding: 2px 6px 2px 12px;
+}
+.idset label { color: var(--muted); font-size: 12px; }
+.idset input { width: 56px; flex: none; padding: 4px 6px; font-size: 13px; }
+.idset button { padding: 4px 12px; font-size: 12px; }
+
+main {
+  display: grid; gap: 14px; padding: 16px 24px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  max-width: 1680px; margin: 0 auto;
+}
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+
+.cam img { width: 100%; border-radius: 8px; background: #000; aspect-ratio: 4/3; object-fit: contain; }
+.cam img.noimg { display: none; }
+
+#joystick {
+  width: 200px; height: 200px; margin: 0 auto 12px; border-radius: 50%;
+  background: radial-gradient(circle, #21262f 60%, #171a20); border: 1px solid var(--line);
+  position: relative; touch-action: none;
+}
+#stick {
+  width: 72px; height: 72px; border-radius: 50%; background: var(--accent);
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+  box-shadow: 0 4px 14px rgba(0,0,0,.4);
+}
+button {
+  background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+  padding: 9px 14px; font-size: 14px; cursor: pointer;
+}
+button:hover { filter: brightness(1.08); }
+button.danger { background: var(--danger); width: 100%; margin-top: 4px; font-weight: 600; }
+button.secondary { background: #0f1218; border: 1px solid var(--line); color: var(--muted); width: 100%; }
+button.secondary.active { border-color: var(--ok); color: var(--ok); }
+
+.roam {
+  display: inline-block; margin-bottom: 8px; padding: 5px 12px;
+  border-radius: 8px; font-size: 13px; font-weight: 600; border: 1px solid var(--line);
+}
+.roam.auto { color: var(--ok); border-color: var(--ok); background: rgba(56,211,159,.10); }
+.roam.locked { color: #f5a623; border-color: #f5a623; background: rgba(245,166,35,.10); }
+
+/* route mission */
+ol.route { list-style: decimal inside; padding: 0; margin: 0 0 10px; }
+ol.route li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 8px; border-top: 1px solid var(--line); }
+ol.route li.cur { background: rgba(76,141,255,.14); border-radius: 6px; }
+ol.route li.missing b { color: var(--muted); text-decoration: line-through; }
+.rctrl { display: flex; gap: 5px; }
+button.mini { padding: 4px 9px; font-size: 12px; background: #0f1218; border: 1px solid var(--line); color: var(--fg); }
+.hint.running { color: var(--accent); font-weight: 600; }
+.hint { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+
+.row { display: flex; gap: 8px; margin-bottom: 10px; }
+input, select {
+  background: #0f1218; border: 1px solid var(--line); color: var(--fg);
+  border-radius: 8px; padding: 8px 10px; font-size: 14px; flex: 1; min-width: 0;
+}
+ul { list-style: none; padding: 0; margin: 0; }
+#wpList li {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 0; border-top: 1px solid var(--line);
+}
+#wpList li span { color: var(--muted); font-size: 12px; }
+#wpList button { padding: 5px 10px; font-size: 12px; }
+.mini-del { background: transparent; color: var(--danger); border: 1px solid var(--line); }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 7px 6px; border-top: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 500; }
+.rssi-bar { height: 6px; border-radius: 3px; background: var(--accent); }
+.connected td { color: var(--ok); }
+.muted { color: var(--muted); }
+
+/* network table: keep it inside the card, wrap long values */
+#netTable { table-layout: fixed; }
+#netTable th, #netTable td { overflow-wrap: anywhere; word-break: break-word; vertical-align: top; }
+#netTable th:nth-child(1), #netTable td:nth-child(1) { width: 3.4em; }
+#netTable th:nth-child(4), #netTable td:nth-child(4) { width: 4.6em; }
+#netTable img, #netTable .wifi-ic { width: 14px; height: 14px; vertical-align: -2px; }
+
+/* map viewer */
+.card.wide { grid-column: 1 / -1; }
+.modes { flex-wrap: wrap; }
+.mode { background: #0f1218; border: 1px solid var(--line); color: var(--muted); }
+.mode.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+#mapWrap { position: relative; margin-top: 6px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: #0b0d11; }
+#mapCanvas { display: none; image-rendering: pixelated; touch-action: none; cursor: crosshair; max-width: 100%; }
+#mapEmpty { padding: 40px; text-align: center; }
+.mapcoord {
+  position: absolute; top: 8px; right: 8px; z-index: 2;
+  background: rgba(15,17,21,.82); border: 1px solid var(--line); border-radius: 6px;
+  padding: 4px 9px; font: 12px ui-monospace, monospace; color: var(--ok);
+  pointer-events: none;
+}

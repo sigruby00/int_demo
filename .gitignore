@@ -1,1 +1,9 @@
 /config.py
+# webnav per-robot runtime state (edited from the web UI)
+/webnav/config/robot_id.json
+/webnav/config/bs_list.json
+/webnav/config/waypoints.json
+/webnav/config/route.json
+
+__pycache__/
+*.pyc

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>TUS Robot {{ robot_id }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header>
+    <h1>TUS Robot <span class="rid" id="ridLabel">#{{ robot_id }}</span></h1>
+    <div class="status">
+      <span class="idset">
+        <label>ID</label>
+        <input id="ridInput" type="number" min="1" max="999" value="{{ robot_id }}">
+        <button id="ridApply">Apply</button>
+      </span>
+      <span id="pose" class="chip">pose —</span>
+      <span id="battery" class="chip">battery —</span>
+      <span id="usb" class="chip off">USB joystick: —</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="card cam">
+      <h2>Camera</h2>
+      <img id="cam" src="/camera" alt="camera preview"
+           onerror="this.classList.add('noimg')">
+    </section>
+
+    <section class="card drive">
+      <h2>Drive</h2>
+      <div id="joystick"><div id="stick"></div></div>
+      <button id="estop" class="danger">STOP</button>
+      <p class="hint">Drag the pad, or use a plugged-in USB joystick.</p>
+    </section>
+
+    <section class="card net">
+      <h2>Network interfaces</h2>
+      <table id="netTable">
+        <thead><tr><th>iface</th><th>SSID / conn</th><th>IP</th><th>mode</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section class="card netcfg">
+      <h2>Network config <span class="hint" style="text-transform:none">(ethernet only)</span></h2>
+      <div id="netcfgLocked" class="roam locked">🔒 Connect via <b>eth0</b> to change Wi-Fi settings</div>
+      <div id="netcfgBody" hidden>
+        <div class="row">
+          <select id="ncIface"><option value="wlan1">wlan1 (sensing)</option><option value="wlan0">wlan0 (control)</option></select>
+          <button id="ncScan">Scan</button>
+        </div>
+        <div class="row">
+          <select id="ncSsid"><option value="">— scan for SSIDs —</option></select>
+        </div>
+        <div class="row">
+          <input id="ncPass" type="password" placeholder="Wi-Fi password (if secured)">
+          <button id="ncConnect">Connect</button>
+        </div>
+        <div class="row" style="gap:16px">
+          <label><input type="radio" name="ncMethod" value="auto" checked> DHCP</label>
+          <label><input type="radio" name="ncMethod" value="manual"> Static</label>
+        </div>
+        <div id="ncStatic" hidden>
+          <div class="row"><input id="ncIp" placeholder="IP / prefix  e.g. 192.168.1.50/24"></div>
+          <div class="row"><input id="ncGw" placeholder="gateway  e.g. 192.168.1.1"></div>
+          <div class="row"><input id="ncDns" placeholder="DNS (optional)  e.g. 8.8.8.8"></div>
+        </div>
+        <button id="ncApplyIp" class="secondary">Apply IP mode</button>
+        <p class="hint" id="ncMsg"></p>
+      </div>
+    </section>
+
+    <section class="card maps wide">
+      <h2>SLAM map</h2>
+      <div class="row">
+        <select id="mapSelect"></select>
+        <button id="applyMap">Load nav</button>
+        <span class="hint" style="align-self:center">nav: <span id="curMap">—</span></span>
+      </div>
+      <div class="row modes">
+        <button class="mode active" data-mode="none">View</button>
+        <button class="mode" data-mode="pose">Set current pose</button>
+        <button class="mode" data-mode="goal">Send goal</button>
+        <button class="mode" data-mode="save">Save waypoint</button>
+      </div>
+      <div id="mapWrap">
+        <div id="mapCoord" class="mapcoord">x —, y —</div>
+        <canvas id="mapCanvas"></canvas>
+        <p id="mapEmpty" class="hint">select a map above to view it</p>
+      </div>
+      <p class="hint" id="mapHint">Tip: in "Set current pose" / "Send goal", click a
+        point then drag to aim heading. Blue = robot.</p>
+    </section>
+
+    <section class="card waypoints">
+      <h2>Waypoints</h2>
+      <div class="row">
+        <input id="wpName" placeholder="name (uses current pose)">
+        <button id="wpAdd">Save here</button>
+      </div>
+      <ul id="wpList"></ul>
+    </section>
+
+    <section class="card mission">
+      <h2>Route mission</h2>
+      <div class="row">
+        <select id="routeAdd"></select>
+        <button id="routeAddBtn">Add ▸</button>
+      </div>
+      <ol id="routeList" class="route"></ol>
+      <div class="row">
+        <button id="routeSave" class="secondary">Save route</button>
+        <button id="missionStart">▶ Start</button>
+        <button id="missionStop" class="danger" style="width:auto">■ Stop</button>
+      </div>
+      <p class="hint" id="missionStatus">idle</p>
+    </section>
+
+    <section class="card bs">
+      <h2>Wi-Fi BS list</h2>
+      <p class="hint">Sensing interface: <b>wlan1</b></p>
+      <div class="row">
+        <input id="bsId" type="number" min="1" placeholder="ap_id" style="max-width:80px">
+        <input id="bsMac" placeholder="bssid  aa:bb:cc:dd:ee:ff">
+        <button id="bsAdd">Add</button>
+      </div>
+      <table id="bsTable">
+        <thead><tr><th>AP</th><th>SSID</th><th>BSSID</th><th>RSSI</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section class="card handover">
+      <h2>Handover (wlan1)</h2>
+      <div id="roamStatus" class="roam">—</div>
+      <p class="hint">connected: <span id="hoCurrent">—</span></p>
+      <div class="row">
+        <select id="hoSelect"></select>
+        <button id="hoGo">Handover</button>
+      </div>
+      <button id="hoAuto" class="secondary">Auto-roam (unlock)</button>
+      <p class="hint">Locks wlan1 to the chosen BS. Auto-roam clears the lock.</p>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='map.js') }}"></script>
+</body>
+</html>
