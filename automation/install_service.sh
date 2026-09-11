@@ -13,14 +13,20 @@ After=network-online.target NetworkManager.service docker.service
 Wants=network-online.target
 
 [Service]
-Type=simple
+# auto_start.sh launches tmux sessions and exits. With the default
+# KillMode=control-group systemd would kill the freshly-spawned tmux server
+# the instant the script returns, so nothing survives boot. oneshot +
+# RemainAfterExit keeps the unit "active", and KillMode=process signals only
+# the script (never the tmux server) on stop -> the sessions persist.
+Type=oneshot
+RemainAfterExit=yes
+KillMode=process
 User=pi
 WorkingDirectory=/home/pi/docker/tmp/int_demo
 Environment=HOME=/home/pi SHELL=/bin/zsh PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 ExecStart=/bin/bash /home/pi/docker/tmp/int_demo/automation/auto_start.sh
 StandardOutput=journal
 StandardError=journal
-Restart=no
 
 [Install]
 WantedBy=multi-user.target
