@@ -17,6 +17,7 @@ WAYPOINT_TIMEOUT = 90.0     # s: give up on a waypoint after this long
 class Control:
     def __init__(self, bridge):
         self.bridge = bridge
+        self.recorder = None            # set by web server; captures teleop for record/replay
         self._current_map = None
         self._last_drive = 0.0
         # mission (ordered waypoint route) state
@@ -26,8 +27,10 @@ class Control:
 
     # ---- teleop ----------------------------------------------------------
     def drive(self, linear, angular):
-        """Direct velocity command (from virtual or USB joystick)."""
+        """Direct velocity command (from virtual/USB joystick, keyboard, or replay)."""
         self._last_drive = time.time()
+        if self.recorder is not None:
+            self.recorder.on_command(linear, angular)
         return self.bridge.send({
             "navigation_mode": "teleop",
             "action": "drive",
@@ -36,6 +39,8 @@ class Control:
         })
 
     def stop(self):
+        if self.recorder is not None:
+            self.recorder.on_command(0.0, 0.0)
         return self.bridge.send({
             "navigation_mode": "teleop", "action": "stop",
             "linear": 0.0, "angular": 0.0,

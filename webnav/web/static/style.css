@@ -119,3 +119,6 @@ th { color: var(--muted); font-weight: 500; }
   padding: 4px 9px; font: 12px ui-monospace, monospace; color: var(--ok);
   pointer-events: none;
 }
+
+.chk{display:flex;align-items:center;gap:4px;font-size:13px;white-space:nowrap}
+.chk input{width:auto}

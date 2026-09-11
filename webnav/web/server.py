@@ -22,6 +22,7 @@ from robot.sensing import Sensing
 from robot.control import Control
 from robot.joystick_usb import USBJoystick
 from robot.camera import Camera
+from robot.recorder import Recorder
 from robot import netinfo
 from robot import netconfig
 
@@ -30,6 +31,8 @@ app = Flask(__name__, template_folder="templates", static_folder="static")
 bridge = DockerBridge()
 sensing = Sensing(bridge)
 control = Control(bridge)
+recorder = Recorder(control)
+control.recorder = recorder          # capture all teleop for record/replay
 usb_joy = USBJoystick(control)
 camera = Camera()
 
@@ -53,6 +56,7 @@ def api_state():
         "current_map": control.current_map(),
         "maps": control.list_maps(),
         "camera": camera.available,
+        "recorder": recorder.status(),
     })
 
 
@@ -127,6 +131,43 @@ def api_drive():
 @app.route("/api/stop", methods=["POST"])
 def api_stop():
     control.stop()
+    return jsonify({"ok": True})
+
+
+# ---- teleop trajectory record & replay (open-loop, no SLAM) --------------
+@app.route("/api/record/start", methods=["POST"])
+def api_record_start():
+    ok, msg = recorder.start_record()
+    return jsonify({"ok": ok, "detail": msg}), (200 if ok else 409)
+
+
+@app.route("/api/record/stop", methods=["POST"])
+def api_record_stop():
+    d = request.get_json(force=True, silent=True) or {}
+    ok, msg = recorder.stop_record(d.get("name", ""))
+    return jsonify({"ok": ok, "detail": msg}), (200 if ok else 400)
+
+
+@app.route("/api/trajectories", methods=["GET"])
+def api_trajectories():
+    return jsonify({"trajectories": recorder.list_names()})
+
+
+@app.route("/api/trajectories/<name>", methods=["DELETE"])
+def api_trajectory_del(name):
+    return jsonify({"ok": recorder.delete(name), "trajectories": recorder.list_names()})
+
+
+@app.route("/api/replay/start", methods=["POST"])
+def api_replay_start():
+    d = request.get_json(force=True, silent=True) or {}
+    ok, msg = recorder.start_replay(d.get("name", ""), bool(d.get("loop", True)))
+    return jsonify({"ok": ok, "detail": msg}), (200 if ok else 400)
+
+
+@app.route("/api/replay/stop", methods=["POST"])
+def api_replay_stop():
+    recorder.stop_replay()
     return jsonify({"ok": True})
 
 

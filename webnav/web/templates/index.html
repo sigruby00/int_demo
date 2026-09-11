@@ -32,7 +32,24 @@
       <h2>Drive</h2>
       <div id="joystick"><div id="stick"></div></div>
       <button id="estop" class="danger">STOP</button>
-      <p class="hint">Drag the pad, or use a plugged-in USB joystick.</p>
+      <p class="hint">Drag the pad, keyboard <b>W/A/S/D</b> (Space = stop), or a USB joystick.</p>
+    </section>
+
+    <section class="card record">
+      <h2>Record &amp; Replay</h2>
+      <div id="recStatus" class="roam">—</div>
+      <div class="row">
+        <button id="recStart">● Record</button>
+        <input id="recName" placeholder="trajectory name">
+        <button id="recStop" class="secondary">■ Stop &amp; Save</button>
+      </div>
+      <div class="row">
+        <select id="trajSelect"></select>
+        <label class="chk"><input type="checkbox" id="replayLoop" checked> loop</label>
+        <button id="replayGo">▶ Replay</button>
+        <button id="replayStop" class="danger" style="width:auto">■ Stop</button>
+      </div>
+      <p class="hint">Drive the robot manually, record it, then replay the same motion (open-loop, no SLAM).</p>
     </section>
 
     <section class="card net">

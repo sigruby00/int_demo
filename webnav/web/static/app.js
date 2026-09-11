@@ -40,13 +40,64 @@ pad.addEventListener("touchstart", startDrag, { passive: false });
 pad.addEventListener("touchmove", move, { passive: false });
 pad.addEventListener("touchend", endDrag);
 
-// stream velocity while dragging (10 Hz)
+// ---- keyboard drive (WASD, Space = stop) ---------------------------------
+const keys = {};
+let keyDriving = false;
+function keyVel() {
+  let lin = 0, ang = 0;
+  if (keys.w) lin += MAX_LINEAR;
+  if (keys.s) lin -= MAX_LINEAR;
+  if (keys.a) ang += MAX_ANGULAR;      // left = CCW
+  if (keys.d) ang -= MAX_ANGULAR;
+  return { lin, ang };
+}
+window.addEventListener("keydown", (e) => {
+  const tag = (e.target.tagName || "").toUpperCase();
+  if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;  // don't hijack typing
+  const k = e.key.toLowerCase();
+  if (k === " ") { keys.w = keys.a = keys.s = keys.d = false; keyDriving = false;
+                   resetStick(); post("/api/stop"); e.preventDefault(); return; }
+  if (!"wasd".includes(k)) return;
+  keys[k] = true; keyDriving = true;
+  const v = keyVel(); cur.lin = v.lin; cur.ang = v.ang;
+  e.preventDefault();
+});
+window.addEventListener("keyup", (e) => {
+  const k = e.key.toLowerCase();
+  if (!"wasd".includes(k)) return;
+  keys[k] = false;
+  const v = keyVel(); cur.lin = v.lin; cur.ang = v.ang;
+  if (!(keys.w || keys.a || keys.s || keys.d)) {
+    keyDriving = false; cur.lin = 0; cur.ang = 0; post("/api/stop");
+  }
+});
+
+// stream velocity while dragging or key-driving (10 Hz)
 sendTimer = setInterval(() => {
-  if (dragging && (cur.lin || cur.ang))
+  if ((dragging || keyDriving) && (cur.lin || cur.ang))
     post("/api/drive", { linear: cur.lin, angular: cur.ang });
 }, 100);
 
 $("#estop").onclick = () => { resetStick(); post("/api/stop"); };
+
+// ---- teleop record & replay ---------------------------------------------
+$("#recStart").onclick = () =>
+  post("/api/record/start").then((r) => { if (!r.ok) alert(r.detail); });
+$("#recStop").onclick = () => {
+  const name = $("#recName").value.trim();
+  if (!name) { alert("enter a trajectory name"); return; }
+  post("/api/record/stop", { name }).then((r) => {
+    if (r.ok) { $("#recName").value = ""; flash($("#recStop"), "Saved"); refreshState(); }
+    else alert(typeof r.detail === "string" ? r.detail : "failed");
+  });
+};
+$("#replayGo").onclick = () => {
+  const name = $("#trajSelect").value;
+  if (!name) { alert("no trajectory selected"); return; }
+  post("/api/replay/start", { name, loop: $("#replayLoop").checked })
+    .then((r) => { if (!r.ok) alert(r.detail); });
+};
+$("#replayStop").onclick = () => post("/api/replay/stop");
 
 // ---- robot id ------------------------------------------------------------
 $("#ridApply").onclick = () => {
@@ -305,6 +356,33 @@ function refreshState() {
       rs.className = "roam locked";
       autoBtn.classList.remove("active");
     }
+    // record & replay status + trajectory dropdown
+    const rec = s.recorder || {};
+    const rst = $("#recStatus");
+    if (rst) {
+      if (rec.recording) {
+        rst.textContent = `● Recording… ${rec.record_points} pts / ${rec.record_elapsed || 0}s`;
+        rst.className = "roam locked";
+      } else if (rec.replay && rec.replay.running) {
+        const rp = rec.replay;
+        rst.textContent = `▶ Replaying "${rp.name}" · lap ${rp.lap} (${rp.elapsed}/${rp.duration}s)${rp.loop ? " ⟳" : ""}`;
+        rst.className = "roam auto";
+      } else {
+        rst.textContent = `idle · ${(rec.trajectories || []).length} saved`;
+        rst.className = "roam";
+      }
+      const tsel = $("#trajSelect");
+      if (tsel && tsel.dataset.n !== String((rec.trajectories || []).length)) {
+        const curv = tsel.value;
+        tsel.innerHTML = "";
+        (rec.trajectories || []).forEach((n) => {
+          const o = document.createElement("option"); o.value = o.textContent = n; tsel.append(o);
+        });
+        tsel.dataset.n = String((rec.trajectories || []).length);
+        if (curv) tsel.value = curv;
+      }
+    }
+
     // sensing rssi cache -> BS table
     lastRssi = {};
     (s.sensing.connections || []).forEach((c) => {
