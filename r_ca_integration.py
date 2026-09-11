@@ -6,6 +6,7 @@ import sys
 import time
 import json
 import socket
+import struct
 import signal
 import subprocess
 import threading
