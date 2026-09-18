@@ -37,6 +37,11 @@ fi
 # next bringup/nav launch (auto-load nav below restarts the container anyway).
 echo "[INFO] Ensuring lidar scan filter is installed..."
 bash "$REPO_HOST/automation/install_scan_filter.sh" 2>&1 | sed 's/^/[scan_filter] /' || true
+# --- 1c) base driver cmd_vel timeout / keep-alive (idempotent) --------------
+# The motor board latches the last speed; without this one lost stop packet or
+# a dead publisher = runaway. See automation/patch_odom_publisher.py.
+echo "[INFO] Ensuring base cmd_vel timeout is installed..."
+bash "$REPO_HOST/automation/install_base_timeout.sh" 2>&1 | sed 's/^/[base_timeout] /' || true
 
 # --- 2) sync SLAM maps into the ROS2 workspace (for on-demand nav) --------
 docker exec -u ubuntu "$DOCKER_NAME" /bin/bash -lc \
