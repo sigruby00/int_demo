@@ -92,10 +92,33 @@ class CommandReceiver(Node):
         # Fast-DDS shared memory is stale, which would kill the whole bridge and
         # take teleop + telemetry down with it. Lazy creation keeps the bridge up.
         self.nav_client = None
+        # ---- teleop watchdog ------------------------------------------------
+        # The base controller latches the last cmd_vel and has no timeout: if a
+        # teleop "stop" is ever lost (missed keyup / closed page / dropped UDP),
+        # the robot keeps executing the last command forever (spins/drives until
+        # a bringup restart). We therefore treat teleop as a HEARTBEAT: keep
+        # republishing the last teleop velocity only while fresh commands keep
+        # arriving, and publish a final zero once they stop. When idle we publish
+        # nothing, so nav2 keeps full control of cmd_vel.
+        import time as _t
+        self._t = _t
+        self._tele_cmd = Twist()
+        self._tele_until = 0.0        # republish _tele_cmd while now <= this
+        self._tele_idle = True
+        self.create_timer(1.0 / 15.0, self._tele_tick)
+        self.TELE_HOLD = 0.6          # s: no heartbeat within this -> auto-stop
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("0.0.0.0", COMMAND_PORT))
         threading.Thread(target=self._recv_loop, daemon=True).start()
         self.get_logger().info(f"listening for commands on UDP {COMMAND_PORT}")
+
+    def _tele_tick(self):
+        now = self._t.time()
+        if now <= self._tele_until:
+            self.cmd_vel.publish(self._tele_cmd)      # heartbeat active
+        elif not self._tele_idle:
+            self.cmd_vel.publish(Twist())             # heartbeat stopped -> final zero
+            self._tele_idle = True                    # then go idle (yield to nav)
 
     def _recv_loop(self):
         while rclpy.ok():
@@ -114,8 +137,16 @@ class CommandReceiver(Node):
             if action == "drive":
                 tw.linear.x = float(cmd.get("linear", 0.0))
                 tw.angular.z = float(cmd.get("angular", 0.0))
-            # "stop" -> zero twist (defaults)
-            self.cmd_vel.publish(tw)
+                # arm the heartbeat: keep publishing this until commands stop
+                self._tele_cmd = tw
+                self._tele_until = self._t.time() + self.TELE_HOLD
+                self._tele_idle = False
+                self.cmd_vel.publish(tw)
+            else:  # "stop" -> immediate zero and disarm heartbeat
+                self._tele_cmd = Twist()
+                self._tele_until = 0.0
+                self._tele_idle = True
+                self.cmd_vel.publish(Twist())
         elif mode == "goal" and action == "goto":
             self._send_goal(float(cmd.get("x", 0.0)), float(cmd.get("y", 0.0)),
                             float(cmd.get("yaw", 0.0)))

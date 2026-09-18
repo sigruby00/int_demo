@@ -78,6 +78,18 @@ sendTimer = setInterval(() => {
     post("/api/drive", { linear: cur.lin, angular: cur.ang });
 }, 100);
 
+// Safety: if the window loses focus / is hidden / closed while a key is held,
+// the keyup never fires and the robot would keep driving forever. Force-stop on
+// any of these so a lost keyup can't latch a spin.
+function forceStop() {
+  keys.w = keys.a = keys.s = keys.d = false;
+  keyDriving = false; cur.lin = 0; cur.ang = 0;
+  resetStick(); post("/api/stop");
+}
+window.addEventListener("blur", forceStop);
+window.addEventListener("pagehide", forceStop);
+document.addEventListener("visibilitychange", () => { if (document.hidden) forceStop(); });
+
 $("#estop").onclick = () => { resetStick(); post("/api/stop"); };
 
 // ---- teleop record & replay ---------------------------------------------
