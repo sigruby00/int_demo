@@ -79,7 +79,7 @@ ROS_WS = "/home/ubuntu/ros2_ws"
 MAPS_DIR = os.path.join(BASE_DIR, "config", "maps")
 # Default SLAM map: preselected in the web nav dropdown so "Load nav" uses it by
 # default. Falls back to the first available map if this one isn't present.
-DEFAULT_MAP = "yrp2_4f"
+DEFAULT_MAP = "yrp_4f_latest"
 
 # ---- camera (local preview only, no server streaming) --------------------
 CAMERA_DEVICE = "/dev/video0"
