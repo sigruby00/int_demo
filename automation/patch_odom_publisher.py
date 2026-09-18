@@ -19,6 +19,7 @@ MARK = "# --- int_demo base watchdog ---"
 CANDIDATES = (
     "~/ros2_ws/src/driver/controller/controller/odom_publisher_node.py",
     "~/ros2_ws/install/controller/**/odom_publisher_node.py",
+    "~/ros2_ws/build/controller/**/odom_publisher_node.py",   # what is actually imported (symlink to src on CA4)
 )
 
 ap = argparse.ArgumentParser()
