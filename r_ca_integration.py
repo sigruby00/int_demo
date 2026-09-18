@@ -792,17 +792,22 @@ def set_uplink(data):
                 return
             iface = USE_INTERFACE_WLAN
         elif path in ("l5g", "wifi1"):
+            # module path: drop the wlan0 host-route so data falls back to the
+            # default route (eth0 -> module), which OCACDB steers L5G vs WiFi1.
             iface = USE_INTERFACE_ETH
+            sh(["sudo", "ip", "route", "del", f"{TARGET_TO_IP}/32"], check=False)
         else:
             print(f"[Uplink] unknown path: {path}")
             return
         ip = get_ip_from_interface(iface)
-        route_replace_host(TARGET_TO_IP, iface)
+        if path == "wifi2":
+            route_replace_host(TARGET_TO_IP, iface)
         try:
             udpgen.update(iface=iface)
         except Exception:
             pass
-        print(f"[Uplink] path={path} -> data via {iface} (ip={ip})")
+        got = sh(["ip", "route", "get", TARGET_TO_IP], check=False, capture=True)
+        print(f"[Uplink] path={path} -> data via {iface} (ip={ip}) route={got}")
         sio.emit("uplink_ack", {"robot_id": str(robot_id), "path": path,
                                 "iface": iface, "ip": ip, "ok": True})
     except Exception as e:
