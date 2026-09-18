@@ -971,6 +971,19 @@ def scan_loop():
             print(f"[Scan] error: {e}")
             time.sleep(2)
 
+def camera_keepalive_loop():
+    """Relaunch the camera stream if it died while enabled (device busy at
+    startup, USB hiccup, ...). Checks every 5 s."""
+    while True:
+        time.sleep(5)
+        try:
+            if camera and camera.enabled and camera.iface and not camera.running():
+                print("[Camera] stream not running -> relaunch")
+                camera.resume()
+        except Exception as e:
+            print(f"[Camera] keepalive error: {e}")
+
+
 # ----------- MAIN ----------------------------
 def main():
     global camera, udpgen
@@ -1000,6 +1013,19 @@ def main():
     threading.Thread(target=sensing_loop, daemon=True).start()
     threading.Thread(target=scan_loop, daemon=True).start()
     threading.Thread(target=status_forward_loop, daemon=True).start()  # central dashboard
+    threading.Thread(target=camera_keepalive_loop, daemon=True).start()
+
+    # stop the camera child on SIGTERM/SIGINT: a restart of this process must
+    # not leave an orphan gst-launch holding /dev/video2 (the new instance
+    # would then fail with "device busy" and the TO screen goes dark)
+    def _on_term(signum, frame):
+        try:
+            if camera:
+                camera.stop()
+        finally:
+            os._exit(0)
+    signal.signal(signal.SIGTERM, _on_term)
+    signal.signal(signal.SIGINT, _on_term)
 
     # 5) 메인 루프 유지
     while True:
