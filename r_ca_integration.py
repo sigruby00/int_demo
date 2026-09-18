@@ -712,6 +712,104 @@ def get_request(data):
         pass
 
 
+# ===========================================================================
+# 3-way uplink switching (fast handover): L5G / WiFi1 (module, via eth0) vs
+# WiFi2 (robot's own wlan0). L5G/WiFi1 are switched module-side by OCACDB NW-IF;
+# the robot only needs to route its data via eth0 for those. WiFi2 routes data
+# via wlan0 (robot's own Wi-Fi kept associated to a fixed AP for fast switching).
+# The server drives this over OUR socket.io link (not OCACDB) with `set_uplink`.
+# ===========================================================================
+ROBOT_WIFI_SSID = "wifi_ap"
+ROBOT_WIFI_BSSID = "84:E8:CB:3A:C5:62"   # robot's own Wi-Fi target (WiFi2)
+_wlan_ready = {"connected": False, "bssid": None}
+
+
+def ensure_wlan_connected(ssid, bssid, password=None):
+    """Bring wlan0 up and keep it associated to (ssid,bssid) via nmcli, so a
+    later switch to WiFi2 is just a route change (no re-association delay).
+    Idempotent: returns True if wlan0 has an IP on the target."""
+    try:
+        cur = get_ip_from_interface(USE_INTERFACE_WLAN)
+        if _wlan_ready["connected"] and cur and cur != "0.0.0.0":
+            return True
+        con = "ca_wifi2"
+        # (re)create a locked profile: ssid + bssid, autoconnect on
+        subprocess.run(["sudo", "nmcli", "connection", "delete", con],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        add = ["sudo", "nmcli", "connection", "add", "type", "wifi",
+               "con-name", con, "ifname", USE_INTERFACE_WLAN,
+               "ssid", ssid, "802-11-wireless.bssid", bssid,
+               "connection.autoconnect", "yes"]
+        if password:
+            add += ["wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", password]
+        subprocess.run(add, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["sudo", "nmcli", "connection", "up", con],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+        ip = None
+        for _ in range(12):
+            ip = get_ip_from_interface(USE_INTERFACE_WLAN)
+            if ip and ip != "0.0.0.0":
+                break
+            time.sleep(1)
+        ok = bool(ip and ip != "0.0.0.0")
+        _wlan_ready.update({"connected": ok, "bssid": bssid if ok else None})
+        print(f"[Uplink] wlan0 assoc {bssid} -> ip={ip} ok={ok}")
+        return ok
+    except Exception as e:
+        print(f"[Uplink] ensure_wlan_connected error: {e}")
+        return False
+
+
+@sio.event
+def set_uplink(data):
+    """Switch the robot's data uplink path (robot_id-filtered).
+    payload: {robot_id, path: 'l5g'|'wifi1'|'wifi2', ssid?, bssid?, password?}
+      l5g / wifi1 -> route data via eth0 (module; OCACDB handles L5G vs WiFi1)
+      wifi2       -> route data via wlan0 (robot's own Wi-Fi)"""
+    if not isinstance(data, dict) or str(data.get("robot_id")) != str(robot_id):
+        return
+    path = data.get("path")
+    try:
+        if path == "wifi2":
+            ssid = data.get("ssid", ROBOT_WIFI_SSID)
+            bssid = data.get("bssid", ROBOT_WIFI_BSSID)
+            if not ensure_wlan_connected(ssid, bssid, data.get("password")):
+                sio.emit("uplink_ack", {"robot_id": str(robot_id), "path": path,
+                                        "ok": False, "detail": "wlan0 not connected"})
+                return
+            iface = USE_INTERFACE_WLAN
+        elif path in ("l5g", "wifi1"):
+            iface = USE_INTERFACE_ETH
+        else:
+            print(f"[Uplink] unknown path: {path}")
+            return
+        ip = get_ip_from_interface(iface)
+        route_replace_host(TARGET_TO_IP, iface)
+        try:
+            udpgen.update(iface=iface)
+        except Exception:
+            pass
+        print(f"[Uplink] path={path} -> data via {iface} (ip={ip})")
+        sio.emit("uplink_ack", {"robot_id": str(robot_id), "path": path,
+                                "iface": iface, "ip": ip, "ok": True})
+    except Exception as e:
+        print(f"[Uplink] set_uplink error: {e}")
+        sio.emit("uplink_ack", {"robot_id": str(robot_id), "path": path,
+                                "ok": False, "detail": str(e)})
+
+
+@sio.event
+def prime_wifi2(data):
+    """Pre-associate wlan0 to the robot's Wi-Fi (WiFi2) WITHOUT switching the
+    data path, so a later set_uplink('wifi2') is instant. robot_id-filtered."""
+    if not isinstance(data, dict) or str(data.get("robot_id")) != str(robot_id):
+        return
+    ok = ensure_wlan_connected(data.get("ssid", ROBOT_WIFI_SSID),
+                               data.get("bssid", ROBOT_WIFI_BSSID),
+                               data.get("password"))
+    sio.emit("uplink_ack", {"robot_id": str(robot_id), "path": "prime_wifi2", "ok": ok})
+
+
 @sio.event
 def update_restart(data):
     """Pull latest code and restart the whole stack (detached, survives kill)."""
