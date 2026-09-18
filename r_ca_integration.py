@@ -168,9 +168,23 @@ class CameraStreamer:
     def __init__(self):
         self.proc = None
         self.lock = threading.Lock()
+        self.enabled = True           # dashboard traffic control (camera on/off)
+        self.iface = None             # last start() args, for resume()
+        self.bind_ip = None
+
+    def running(self):
+        return self.proc is not None and self.proc.poll() is None
+
+    def resume(self):
+        if self.iface and self.bind_ip:
+            self.start(self.iface, self.bind_ip)
 
     def start(self, iface, bind_ip):
+        self.iface, self.bind_ip = iface, bind_ip
         self.stop()
+        if not self.enabled:
+            print("[Camera] disabled by dashboard, not launching")
+            return
         # 스트림 목적지 IP를 지정 인터페이스로 강제 라우팅
         route_replace_host(TARGET_TO_IP, iface)
 
@@ -204,9 +218,20 @@ class UDPGenerator(threading.Thread):
         self.running = True
         self.iface = USE_INTERFACE_ETH
         self.packet_size = 1200
+        self.mbps = UDP_BITRATE_MBPS
         self.interval = (self.packet_size * 8) / (UDP_BITRATE_MBPS * 1e6)
+        self.enabled = True           # dashboard traffic control (udp on/off)
         self.lock = threading.Lock()
         self.sock = None  # 소켓 멤버 유지
+
+    def set_rate(self, mbps):
+        """Change the generated bitrate (Mbps) on the fly; clamped 0.1..100."""
+        mbps = max(0.1, min(100.0, float(mbps)))
+        with self.lock:
+            self.mbps = mbps
+            self.interval = (self.packet_size * 8) / (mbps * 1e6)
+        print(f"[UDP] rate -> {mbps:.2f} Mbps (interval {self.interval*1000:.3f} ms)")
+        return mbps
 
     def update(self, iface):
         with self.lock:
@@ -221,6 +246,9 @@ class UDPGenerator(threading.Thread):
     def run(self):
         while self.running:
             try:
+                if not self.enabled:
+                    time.sleep(0.2)
+                    continue
                 with self.lock:
                     if self.sock is None:
                         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -556,7 +584,49 @@ def _compact_status():
         "replay": {"running": rep.get("running"), "name": rep.get("name"),
                    "lap": rep.get("lap")},
         "camera": s.get("camera"),
+        "traffic": _traffic_state(),
     }
+
+
+def _traffic_state():
+    return {
+        "camera": bool(camera and camera.enabled),
+        "camera_running": bool(camera and camera.running()),
+        "udp": bool(udpgen and udpgen.enabled),
+        "mbps": round(udpgen.mbps, 2) if udpgen else None,
+    }
+
+
+@sio.event
+def traffic_control(data):
+    """Dashboard: start/stop the camera stream and the UDP generator, set Mbps.
+    {robot_id, camera: on|off, udp: on|off, mbps: <number>} (all optional)."""
+    if not isinstance(data, dict) or str(data.get("robot_id")) != str(robot_id):
+        return
+    ok, detail = True, []
+    try:
+        if data.get("camera") in ("on", "off"):
+            want = data["camera"] == "on"
+            if camera is None:
+                ok = False; detail.append("camera streamer not available")
+            else:
+                camera.enabled = want
+                if want:
+                    camera.resume()
+                else:
+                    camera.stop()
+                detail.append(f"camera {'on' if want else 'off'}")
+        if data.get("udp") in ("on", "off"):
+            want = data["udp"] == "on"
+            udpgen.enabled = want
+            detail.append(f"udp {'on' if want else 'off'}")
+        if data.get("mbps") is not None:
+            detail.append(f"udp {udpgen.set_rate(data['mbps']):.2f} Mbps")
+    except Exception as e:
+        ok = False; detail.append(str(e))
+    print(f"[Traffic] {data} -> {ok} {detail}")
+    sio.emit("traffic_ack", {"robot_id": str(robot_id), "ok": ok,
+                             "detail": ", ".join(detail), **_traffic_state()})
 
 
 def status_forward_loop():
