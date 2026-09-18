@@ -31,6 +31,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from std_msgs.msg import UInt16
 from tf2_ros import Buffer, TransformListener
 from nav2_msgs.action import NavigateToPose
+from action_msgs.srv import CancelGoal
 from ros_robot_controller_msgs.msg import MotorsState, MotorState
 
 HOST_IP = "127.0.0.1"
@@ -186,6 +187,7 @@ class CommandReceiver(Node):
         # Fast-DDS shared memory is stale, which would kill the whole bridge and
         # take teleop + telemetry down with it. Lazy creation keeps the bridge up.
         self.nav_client = None
+        self.cancel_cli = None        # /navigate_to_pose cancel service (lazy)
         # ---- teleop watchdog ------------------------------------------------
         # The base controller latches the last cmd_vel and has no timeout: if a
         # teleop "stop" is ever lost (missed keyup / closed page / dropped UDP),
@@ -220,6 +222,13 @@ class CommandReceiver(Node):
         self._wd_zero_at = 0.0
         self._wd_zero_sent = 0
         self._wd_world_since = 0.0
+        # stall protection: commanded to move but the world does not change
+        # (robot pinned against a wall by a stale localisation / bad goal ->
+        # motors cook). After WD_STALL s: stop + cancel the nav2 goal.
+        self.WD_STALL = 5.0
+        self._wd_last_lin = 0.0
+        self._wd_last_ang = 0.0
+        self._wd_stall_since = 0.0
         self._wd_last_cmd_nonzero = False
         self._wd_last_cmd_time = 0.0
         self._wd_stale_fired = False
@@ -262,6 +271,8 @@ class CommandReceiver(Node):
         self._wd_last_cmd_nonzero = nz
         self._wd_last_cmd_time = now
         self._wd_stale_fired = False
+        self._wd_last_lin = math.hypot(msg.linear.x, msg.linear.y)
+        self._wd_last_ang = abs(msg.angular.z)
 
     def _wd_stop(self, why, moving):
         now = self._t.time()
@@ -309,9 +320,29 @@ class CommandReceiver(Node):
     def _wd_tick(self):
         self.sampler.poll()
         now = self._t.time()
+        age = now - self._wd_last_cmd_time
+        # ---- stall protection (all modes, teleop included) --------------------
+        lm = self.sampler.lidar_motion(now)
+        cmd_moving = (self._wd_last_cmd_nonzero and age < 0.5
+                      and (self._wd_last_lin >= 0.05 or self._wd_last_ang >= 0.2))
+        world_still = (lm is not None and lm < 0.01
+                       and abs(self.sampler.gyro_z) < 0.05)
+        if cmd_moving and world_still:
+            if self._wd_stall_since == 0.0:
+                self._wd_stall_since = now
+            elif now - self._wd_stall_since > self.WD_STALL:
+                self._wd_stall_since = now
+                self._tele_until = 0.0; self._tele_idle = True
+                self.cmd_vel.publish(Twist())
+                self.cancel_nav("stall")
+                self.get_logger().warn(
+                    f"base watchdog STALL: commanded lin={self._wd_last_lin:.2f} "
+                    f"ang={self._wd_last_ang:.2f} for {self.WD_STALL:.0f}s but no motion "
+                    f"(lidar_d={lm:.3f} gyro={self.sampler.gyro_z:.2f}) -> stop + cancel nav")
+        else:
+            self._wd_stall_since = 0.0
         if now <= self._tele_until:
             return                                    # teleop heartbeat owns the base
-        age = now - self._wd_last_cmd_time
         # redundant zeros after a stop (only while nobody asked to move again)
         if (not self._wd_last_cmd_nonzero and self._wd_zero_at
                 and self._wd_zero_sent < len(self.WD_ZERO_RESEND)
@@ -323,7 +354,6 @@ class CommandReceiver(Node):
                        or abs(wz) > self.WD_MOVING_ANG)
         # world-based motion: gyro (rotation) or lidar scene change (any motion),
         # must persist >= 0.5 s to count
-        lm = self.sampler.lidar_motion(now)
         world = (abs(self.sampler.gyro_z) > self.WD_GYRO
                  or (lm is not None and lm > self.sampler.LIDAR_MOVING_M))
         if world:
@@ -331,6 +361,13 @@ class CommandReceiver(Node):
                 self._wd_world_since = now
         else:
             self._wd_world_since = 0.0
+        # stall protection: commanded to move but the world does not change
+        # (robot pinned against a wall by a stale localisation / bad goal ->
+        # motors cook). After WD_STALL s: stop + cancel the nav2 goal.
+        self.WD_STALL = 5.0
+        self._wd_last_lin = 0.0
+        self._wd_last_ang = 0.0
+        self._wd_stall_since = 0.0
         world_moving = world and now - self._wd_world_since >= 0.5
         moving = odom_moving or world_moving
         if self._wd_last_cmd_nonzero and age > self.WD_STALE and not self._wd_stale_fired:
@@ -370,6 +407,9 @@ class CommandReceiver(Node):
                 self._tele_until = 0.0
                 self._tele_idle = True
                 self.cmd_vel.publish(Twist())
+                self.cancel_nav("teleop stop")     # stop means STOP, nav2 too
+        elif mode == "goal" and action == "cancel":
+            self.cancel_nav("cancel command")
         elif mode == "goal" and action == "goto":
             self._send_goal(float(cmd.get("x", 0.0)), float(cmd.get("y", 0.0)),
                             float(cmd.get("yaw", 0.0)))
@@ -393,6 +433,18 @@ class CommandReceiver(Node):
         msg.pose.covariance = cov
         self.initpose_pub.publish(msg)
         self.get_logger().info(f"set initial pose ({x:.2f}, {y:.2f}, {yaw:.2f})")
+
+    def cancel_nav(self, why=""):
+        """Cancel EVERY active NavigateToPose goal (empty goal_info = all), not
+        only the ones we sent: otherwise nav2 keeps overriding any stop at 20 Hz."""
+        if self.cancel_cli is None:
+            self.cancel_cli = self.create_client(
+                CancelGoal, "/navigate_to_pose/_action/cancel_goal")
+        if not self.cancel_cli.service_is_ready():
+            return False                              # no nav2 running: nothing to cancel
+        self.cancel_cli.call_async(CancelGoal.Request())
+        self.get_logger().info(f"cancelled nav2 goals ({why})")
+        return True
 
     def _send_goal(self, x, y, yaw=0.0):
         if self.nav_client is None:

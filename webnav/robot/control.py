@@ -39,12 +39,18 @@ class Control:
         })
 
     def stop(self):
+        """Full stop: zero the base AND cancel any nav2 goal (the bridge cancels
+        on teleop stop too; the explicit cancel covers a bridge that restarted)."""
         if self.recorder is not None:
             self.recorder.on_command(0.0, 0.0)
+        self.bridge.send({"navigation_mode": "goal", "action": "cancel"})
         return self.bridge.send({
             "navigation_mode": "teleop", "action": "stop",
             "linear": 0.0, "angular": 0.0,
         })
+
+    def cancel_goal(self):
+        return self.bridge.send({"navigation_mode": "goal", "action": "cancel"})
 
     # ---- manual localization --------------------------------------------
     def set_initial_pose(self, x, y, yaw=0.0):
@@ -123,6 +129,7 @@ class Control:
                         self._mission.update({"message": f"error at {name}: {e}"})
                         arrived = False
                     if not arrived:
+                        self.cancel_goal()            # never leave a stale goal running
                         if self._mission_stop.is_set():
                             break
                         self._mission.update({"message": f"timeout at {name}, continuing"})
