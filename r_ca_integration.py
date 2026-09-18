@@ -65,7 +65,7 @@ TARGET_TO_IP = next((item['to_ip'] for item in TO_IP_LIST if item['to_id'] == to
 
 # 인터페이스별 GW 오버라이드
 GW_OVERRIDE = {
-    "wlan0": "192.168.101.1",   # wlan0은 이 GW로 강제
+    "wlan0": "10.100.61.141",   # WiFi2 (robot's own Wi-Fi) gateway
     "eth0": "192.168.11.1",     # 필요하면 다른 인터페이스도 지정 가능
 }
 print(TARGET_TO_IP)
@@ -721,27 +721,40 @@ def get_request(data):
 # ===========================================================================
 ROBOT_WIFI_SSID = "wifi_ap"
 ROBOT_WIFI_BSSID = "84:E8:CB:3A:C5:62"   # robot's own Wi-Fi target (WiFi2)
+ROBOT_WIFI_GW = "10.100.61.141"          # WiFi2 gateway
+ROBOT_WIFI_DNS = "8.8.8.8"
+# password is passed by the server per-command; fallback to env (never in git)
+ROBOT_WIFI_PASSWORD = os.environ.get("CA_WIFI2_PASS", "")
+# static IP per robot: 10.100.61.23<robot_id>  (CA4->.234, CA5->.235, ...)
+ROBOT_WIFI_IP = f"10.100.61.23{robot_id}"
 _wlan_ready = {"connected": False, "bssid": None}
 
 
 def ensure_wlan_connected(ssid, bssid, password=None):
-    """Bring wlan0 up and keep it associated to (ssid,bssid) via nmcli, so a
-    later switch to WiFi2 is just a route change (no re-association delay).
-    Idempotent: returns True if wlan0 has an IP on the target."""
+    """Bring wlan0 up and keep it associated to (ssid,bssid) via nmcli with a
+    STATIC ip (10.100.61.23<robot_id>), so a later switch to WiFi2 is just a
+    route change (no re-association/DHCP delay). never-default so wlan0 does NOT
+    steal the module (eth0) default route. Idempotent."""
     try:
         cur = get_ip_from_interface(USE_INTERFACE_WLAN)
-        if _wlan_ready["connected"] and cur and cur != "0.0.0.0":
+        if _wlan_ready["connected"] and cur == ROBOT_WIFI_IP:
             return True
+        pw = password or ROBOT_WIFI_PASSWORD
         con = "ca_wifi2"
-        # (re)create a locked profile: ssid + bssid, autoconnect on
         subprocess.run(["sudo", "nmcli", "connection", "delete", con],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         add = ["sudo", "nmcli", "connection", "add", "type", "wifi",
                "con-name", con, "ifname", USE_INTERFACE_WLAN,
-               "ssid", ssid, "802-11-wireless.bssid", bssid,
-               "connection.autoconnect", "yes"]
-        if password:
-            add += ["wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", password]
+               "ssid", ssid,
+               "802-11-wireless.bssid", bssid,
+               "connection.autoconnect", "yes",
+               "ipv4.method", "manual",
+               "ipv4.addresses", f"{ROBOT_WIFI_IP}/24",
+               "ipv4.gateway", ROBOT_WIFI_GW,
+               "ipv4.dns", ROBOT_WIFI_DNS,
+               "ipv4.never-default", "yes",       # don't hijack default route
+               "wifi-sec.key-mgmt", "wpa-psk",
+               "wifi-sec.psk", pw]
         subprocess.run(add, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(["sudo", "nmcli", "connection", "up", con],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
@@ -751,9 +764,9 @@ def ensure_wlan_connected(ssid, bssid, password=None):
             if ip and ip != "0.0.0.0":
                 break
             time.sleep(1)
-        ok = bool(ip and ip != "0.0.0.0")
+        ok = (ip == ROBOT_WIFI_IP)
         _wlan_ready.update({"connected": ok, "bssid": bssid if ok else None})
-        print(f"[Uplink] wlan0 assoc {bssid} -> ip={ip} ok={ok}")
+        print(f"[Uplink] wlan0 assoc {bssid} static {ROBOT_WIFI_IP} -> ip={ip} ok={ok}")
         return ok
     except Exception as e:
         print(f"[Uplink] ensure_wlan_connected error: {e}")
