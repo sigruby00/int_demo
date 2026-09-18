@@ -1,7 +1,7 @@
 """ROS2-side bridge, runs INSIDE the MentorPi docker container.
 
 Pairs with robot/docker_bridge.py on the host:
-  * PoseSender     : /odom, battery + TF(map->base_link) -> host UDP :9000
+  * PoseSender     : /odom, battery + map pose (amcl/slam + odom delta) -> host UDP :9000
   * CommandReceiver: host UDP :9002 -> teleop cmd_vel / NavigateToPose goals
   * BaseWatchdog   : (inside CommandReceiver) stops the base when the last
                      velocity command is stale or the wheels keep turning after
@@ -29,7 +29,6 @@ from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu, LaserScan
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from std_msgs.msg import UInt16
-from tf2_ros import Buffer, TransformListener
 from nav2_msgs.action import NavigateToPose
 from action_msgs.srv import CancelGoal
 from ros_robot_controller_msgs.msg import MotorsState, MotorState
@@ -63,6 +62,10 @@ def rrc_stop_packet():
     return bytes([0xAA, 0x55] + body + [_crc8(bytes(body))])
 
 
+def _yaw(q):
+    return math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
+
+
 class Sampler(Node):
     """High-rate topics (/odom ~100 Hz, battery) are NOT spun by the main
     executor: they use KEEP_LAST(1) and are polled ~10x/s via spin_once, so the
@@ -84,11 +87,44 @@ class Sampler(Node):
                                  self._battery, q1)
         self.create_subscription(Imu, "/imu", self._imu, q1)
         self.create_subscription(LaserScan, "/scan_raw", self._scan, q1)
+        # localisation without a TF listener (a Python TransformListener eats
+        # every /tf message: 100 Hz ekf + wheels + amcl -> ~15-30% of a core).
+        # AMCL (/amcl_pose) and slam_toolbox (/pose) publish map->base at their
+        # update instants; we propagate it with the odom delta since then.
+        self.loc = None           # (t_sec, x, y, yaw) map->base_footprint at t
+        self._odom_hist = []      # [(t_sec, x, y, yaw)] ~10 Hz, last 3 s
+        self.create_subscription(PoseWithCovarianceStamped, "/amcl_pose", self._loc, q1)
+        self.create_subscription(PoseWithCovarianceStamped, "/pose", self._loc, q1)
         self._exec = SingleThreadedExecutor()
         self._exec.add_node(self)
 
     def _odom(self, msg):
         self.odom = msg
+        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        p, q = msg.pose.pose.position, msg.pose.pose.orientation
+        self._odom_hist.append((t, p.x, p.y, _yaw(q)))
+        if len(self._odom_hist) > 40:
+            del self._odom_hist[0]
+
+    def _loc(self, msg):
+        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        p, q = msg.pose.pose.position, msg.pose.pose.orientation
+        self.loc = (t, p.x, p.y, _yaw(q))
+
+    def map_pose(self):
+        """map->base now = loc(t_a) (+) odom(now) (-) odom(t_a)  (2-D)."""
+        if self.loc is None or not self._odom_hist:
+            return None
+        ta, X, Y, TH = self.loc
+        # odom sample nearest to the localisation instant
+        oa = min(self._odom_hist, key=lambda h: abs(h[0] - ta))
+        on = self._odom_hist[-1]
+        dx, dy, dth = on[1] - oa[1], on[2] - oa[2], on[3] - oa[3]
+        c, s_ = math.cos(-oa[3]), math.sin(-oa[3])        # into base(t_a)
+        bx, by = c * dx - s_ * dy, s_ * dx + c * dy
+        c, s_ = math.cos(TH), math.sin(TH)                 # into map
+        return {"x": X + c * bx - s_ * by, "y": Y + s_ * bx + c * by,
+                "yaw": math.atan2(math.sin(TH + dth), math.cos(TH + dth))}
 
     def _battery(self, msg):
         # controller reports battery as a 0..~105 scaled value -> percent
@@ -149,20 +185,14 @@ class PoseSender(Node):
         self.sampler = sampler
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.pos = {"x": 0.0, "y": 0.0, "yaw": 0.0}
-        self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
         self.create_timer(0.5, self._tick)
 
     def _tick(self):
+        self.sampler.poll()
         try:
-            if self.tf_buffer.can_transform("map", "base_link", rclpy.time.Time()):
-                tr = self.tf_buffer.lookup_transform("map", "base_link", rclpy.time.Time())
-                t, q = tr.transform.translation, tr.transform.rotation
-                self.pos = {
-                    "x": t.x, "y": t.y,
-                    "yaw": math.atan2(2 * (q.w * q.z + q.x * q.y),
-                                      1 - 2 * (q.y * q.y + q.z * q.z)),
-                }
+            mp = self.sampler.map_pose()
+            if mp is not None:
+                self.pos = mp
         except Exception:
             pass
         vx, _, wz = self.sampler.speeds()
