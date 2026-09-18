@@ -13,3 +13,11 @@ Install / re-install on a TO (from the server, key auth as bitmeister):
 
 `run_to_recv.sh` keeps it in tmux session `to_recv` with auto-restart; log: `/tmp/q_to_recv.log`.
 Deployed 2026-09-18 on TO4–TO8. (No passwordless sudo on the TOs -> cron instead of systemd.)
+
+## Video receiver (GStreamer, robot camera -> UDP 5000 -> TO screen)
+
+`to_video_setup.sh nict|plain` (in `~/to_recv/` on each TO) kills stale `gst-launch` instances,
+runs `q_to_video_receiver_nict.sh` (or the plain one) in tmux session `to_video` with auto-restart
+on DISPLAY=:0, and registers itself `@reboot`. TO7 uses `plain`, the others `nict` (as found running).
+Log: `/tmp/q_to_video.log`. Never `pkill -f` these names from an inline ssh command: the pattern
+matches the ssh shell itself and kills your session (happened twice).

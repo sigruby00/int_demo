@@ -161,7 +161,7 @@ class Sampler(Node):
     # the one ~1 s earlier. Stationary: ~0.5-1 cm (noise). Driving 0.1 m/s or
     # spinning: several cm. Robust to a person walking past (median).
     LIDAR_WINDOW = 1.0            # s
-    LIDAR_MOVING_M = 0.03         # m median change over the window
+    LIDAR_MOVING_M = 0.05         # m median change over the window (0.03 gave false alarms from people nearby)
 
     LIDAR_BINS = 360
 
@@ -444,7 +444,7 @@ class CommandReceiver(Node):
         self._wd_last_lin = 0.0
         self._wd_last_ang = 0.0
         self._wd_stall_since = 0.0
-        world_moving = world and now - self._wd_world_since >= 0.5
+        world_moving = world and now - self._wd_world_since >= 1.0
         moving = odom_moving or world_moving
         if self._wd_last_cmd_nonzero and age > self.WD_STALE and not self._wd_stale_fired:
             self._wd_stale_fired = True               # -> our own zero re-arms via _wd_cmd
