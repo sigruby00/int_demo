@@ -31,6 +31,13 @@ if ! tmux has-session -t int_demo 2>/dev/null; then
     "cd $REPO_HOST && while true; do python3 ./r_ca_integration.py; echo '[WARN] r_ca_integration ended, restart in 3s'; sleep 3; done" C-m
 fi
 
+# --- 1b) lidar near-range filter (idempotent, patches the LD19 launch) ------
+# Guarantees every robot drops its own body/antenna/cable returns (< 0.30 m)
+# on every boot, even after a container/workspace refresh. Takes effect on the
+# next bringup/nav launch (auto-load nav below restarts the container anyway).
+echo "[INFO] Ensuring lidar scan filter is installed..."
+bash "$REPO_HOST/automation/install_scan_filter.sh" 2>&1 | sed 's/^/[scan_filter] /' || true
+
 # --- 2) sync SLAM maps into the ROS2 workspace (for on-demand nav) --------
 docker exec -u ubuntu "$DOCKER_NAME" /bin/bash -lc \
   "mkdir -p $ROS_WS/src/slam/maps && cp -rf $REPO_DOCKER/webnav/config/maps/* $ROS_WS/src/slam/maps/ 2>/dev/null || true" \
