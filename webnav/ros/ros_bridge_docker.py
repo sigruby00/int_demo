@@ -27,7 +27,7 @@ from rclpy.executors import SingleThreadedExecutor
 from geometry_msgs.msg import (Twist, PoseStamped, PoseWithCovarianceStamped)
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu, LaserScan
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from std_msgs.msg import UInt16
 from nav2_msgs.action import NavigateToPose
 from action_msgs.srv import CancelGoal
@@ -93,8 +93,15 @@ class Sampler(Node):
         # update instants; we propagate it with the odom delta since then.
         self.loc = None           # (t_sec, x, y, yaw) map->base_footprint at t
         self._odom_hist = []      # [(t_sec, x, y, yaw)] ~10 Hz, last 3 s
-        self.create_subscription(PoseWithCovarianceStamped, "/amcl_pose", self._loc, q1)
-        self.create_subscription(PoseWithCovarianceStamped, "/pose", self._loc, q1)
+        # one volatile + one transient_local subscription per topic: a latched
+        # publisher (AMCL) only matches the latter, and it hands us the last
+        # pose right away after a bridge restart while the robot stands still.
+        q1l = QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
+                         history=HistoryPolicy.KEEP_LAST, depth=1,
+                         durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        for topic in ("/amcl_pose", "/pose"):
+            self.create_subscription(PoseWithCovarianceStamped, topic, self._loc, q1)
+            self.create_subscription(PoseWithCovarianceStamped, topic, self._loc, q1l)
         self._exec = SingleThreadedExecutor()
         self._exec.add_node(self)
 
@@ -150,33 +157,43 @@ class Sampler(Node):
     LIDAR_WINDOW = 1.0            # s
     LIDAR_MOVING_M = 0.03         # m median change over the window
 
+    LIDAR_BINS = 360
+
+    @classmethod
+    def _bin(cls, sc):
+        """Resample a scan to fixed 1-degree bins (nearest valid beam) so scans
+        with different point counts (LD19: 504/505) compare beam-for-beam."""
+        n = cls.LIDAR_BINS
+        out = [float("nan")] * n
+        a = sc.angle_min
+        inc = sc.angle_increment
+        for k, v in enumerate(sc.ranges):
+            if v != v or v == float("inf"):
+                continue
+            b = int((math.degrees(a + k * inc) % 360.0)) % n
+            if out[b] != out[b] or v < out[b]:
+                out[b] = v
+        return out
+
     def lidar_motion(self, now):
         sc = self.scan
         if sc is None:
             return None
         if not self._scan_hist or now - self._scan_hist[-1][0] >= 0.25:
-            self._scan_hist.append((now, sc.ranges))
+            self._scan_hist.append((now, self._bin(sc)))
             self._scan_hist = [h for h in self._scan_hist if now - h[0] <= 1.6]
         old = None
         for t, r in self._scan_hist:
             if now - t >= self.LIDAR_WINDOW:
                 old = r
-        if old is None or len(old) != len(sc.ranges):
+        if old is None:
             return None
-        d = []
-        for a, b in zip(old, sc.ranges):
-            if a == a and b == b and a != float("inf") and b != float("inf"):
-                d.append(abs(a - b))
-        if len(d) < 50:
+        cur = self._scan_hist[-1][1]
+        d = [abs(a - b) for a, b in zip(old, cur) if a == a and b == b]
+        if len(d) < 40:
             return None
         d.sort()
         return d[len(d) // 2]
-
-    def speeds(self):
-        if self.odom is None:
-            return 0.0, 0.0, 0.0
-        t = self.odom.twist.twist
-        return t.linear.x, t.linear.y, t.angular.z
 
 
 class PoseSender(Node):
@@ -276,6 +293,8 @@ class CommandReceiver(Node):
         self.create_subscription(Twist, CMD_VEL_TOPIC, self._wd_cmd, qwd)   # teleop/apps (+ our own)
         self.create_subscription(Twist, "/cmd_vel", self._wd_cmd, qwd)      # nav2 velocity_smoother
         self.create_timer(0.1, self._wd_tick)
+        self._wd_lm_last = None
+        self.create_timer(30.0, self._wd_report)
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("0.0.0.0", COMMAND_PORT))
         threading.Thread(target=self._recv_loop, daemon=True).start()
@@ -290,6 +309,13 @@ class CommandReceiver(Node):
             self._tele_idle = True                    # then go idle (yield to nav)
 
     # ---- base watchdog --------------------------------------------------------
+    def _wd_report(self):
+        lm = self._wd_lm_last
+        self.get_logger().info(
+            f"watchdog: lidar_d={'n/a' if lm is None else round(lm, 4)} "
+            f"gyro={self.sampler.gyro_z:.3f} events={self._wd_events} "
+            f"loc={'yes' if self.sampler.loc else 'no'}")
+
     def _wd_cmd(self, msg):
         nz = (abs(msg.linear.x) > 1e-6 or abs(msg.linear.y) > 1e-6
               or abs(msg.angular.z) > 1e-6)
@@ -353,6 +379,7 @@ class CommandReceiver(Node):
         age = now - self._wd_last_cmd_time
         # ---- stall protection (all modes, teleop included) --------------------
         lm = self.sampler.lidar_motion(now)
+        self._wd_lm_last = lm
         cmd_moving = (self._wd_last_cmd_nonzero and age < 0.5
                       and (self._wd_last_lin >= 0.05 or self._wd_last_ang >= 0.2))
         world_still = (lm is not None and lm < 0.01
