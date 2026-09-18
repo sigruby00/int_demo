@@ -59,6 +59,7 @@ CAMERA_WIDTH = 1280
 CAMERA_HEIGHT = 720
 CAMERA_FPS = 30
 CAMERA_PORT = 5000
+CAMERA_TO_STREAM = True     # H.264 (/dev/video2) -> TO:5000 for the TO-side GStreamer screen
 UDP_PORT = 6001
 UDP_BITRATE_MBPS = 10.0
 TARGET_TO_IP = next((item['to_ip'] for item in TO_IP_LIST if item['to_id'] == to_id), None)
@@ -333,7 +334,7 @@ def handover_ap(target_bssid):
 
         # 라우트 및 경로 전환
         route_replace_host(TARGET_TO_IP, USE_INTERFACE_WLAN)
-        camera.start(iface=USE_INTERFACE_WLAN, bind_ip=new_ip)
+        if camera: camera.start(iface=USE_INTERFACE_WLAN, bind_ip=new_ip)
         udpgen.update(iface=USE_INTERFACE_WLAN)
 
     except Exception as e:
@@ -464,7 +465,7 @@ def command(data):
             local_ip = get_ip_from_interface(iface)
             # 스트림 목적지 라우트 eth0으로 강제
             route_replace_host(TARGET_TO_IP, iface)
-            camera.start(iface=iface, bind_ip=local_ip)
+            if camera: camera.start(iface=iface, bind_ip=local_ip)
             udpgen.update(iface=iface)
             return
 
@@ -906,7 +907,7 @@ def main():
     # 4) 최초 연결 (실패 시 watchdog이 책임짐)
     reconnect_socket()
 
-    # camera = CameraStreamer()
+    camera = CameraStreamer() if CAMERA_TO_STREAM else None
     udpgen = UDPGenerator()
 
     # 1) Socket.IO 서버 IP는 항상 eth0로 라우팅 고정
@@ -919,7 +920,8 @@ def main():
     default_iface = USE_INTERFACE_ETH
     default_ip = get_ip_from_interface(default_iface)
     route_replace_host(TARGET_TO_IP, default_iface)
-    # camera.start(iface=default_iface, bind_ip=default_ip)
+    if camera:
+        camera.start(iface=default_iface, bind_ip=default_ip)
     udpgen.start()
 
     # 3) 백그라운드 스레드 시작
