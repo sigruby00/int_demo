@@ -145,8 +145,14 @@ class Sampler(Node):
 
     def poll(self):
         # drain whatever is pending (at most one per subscription with depth 1)
-        for _ in range(6):
+        for _ in range(8):
             self._exec.spin_once(timeout_sec=0.0)
+
+    def speeds(self):
+        if self.odom is None:
+            return 0.0, 0.0, 0.0
+        t = self.odom.twist.twist
+        return t.linear.x, t.linear.y, t.angular.z
 
     # -- lidar motion detector ------------------------------------------------
     # The MentorPi base has NO wheel feedback (odom_raw just integrates the
