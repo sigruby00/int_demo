@@ -1033,5 +1033,5 @@ def main():
 
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, lambda s, f: sys.exit(0))
-    signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
+    # (SIGTERM handled by _on_term above: stops the camera child, then exits)
     main()
