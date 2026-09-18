@@ -26,6 +26,7 @@ from rclpy.executors import SingleThreadedExecutor
 
 from geometry_msgs.msg import (Twist, PoseStamped, PoseWithCovarianceStamped)
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import Imu, LaserScan
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from std_msgs.msg import UInt16
 from tf2_ros import Buffer, TransformListener
@@ -72,11 +73,16 @@ class Sampler(Node):
         super().__init__("tus_sampler")
         self.odom = None          # latest nav_msgs/Odometry
         self.battery = None
+        self.gyro_z = 0.0
+        self.scan = None          # latest LaserScan
+        self._scan_hist = []      # [(t, ranges)] ~4 Hz, last ~1.5 s
         q1 = QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
                         history=HistoryPolicy.KEEP_LAST, depth=1)
         self.create_subscription(Odometry, "/odom", self._odom, q1)
         self.create_subscription(UInt16, "/ros_robot_controller/battery",
                                  self._battery, q1)
+        self.create_subscription(Imu, "/imu", self._imu, q1)
+        self.create_subscription(LaserScan, "/scan_raw", self._scan, q1)
         self._exec = SingleThreadedExecutor()
         self._exec.add_node(self)
 
@@ -87,10 +93,47 @@ class Sampler(Node):
         # controller reports battery as a 0..~105 scaled value -> percent
         self.battery = round(msg.data / 105.0, 1)
 
+    def _imu(self, msg):
+        self.gyro_z = msg.angular_velocity.z
+
+    def _scan(self, msg):
+        self.scan = msg
+
     def poll(self):
         # drain whatever is pending (at most one per subscription with depth 1)
-        for _ in range(4):
+        for _ in range(6):
             self._exec.spin_once(timeout_sec=0.0)
+
+    # -- lidar motion detector ------------------------------------------------
+    # The MentorPi base has NO wheel feedback (odom_raw just integrates the
+    # commanded velocity), so the only way to know the wheels really stopped is
+    # to look at the world: median |delta range| between the current scan and
+    # the one ~1 s earlier. Stationary: ~0.5-1 cm (noise). Driving 0.1 m/s or
+    # spinning: several cm. Robust to a person walking past (median).
+    LIDAR_WINDOW = 1.0            # s
+    LIDAR_MOVING_M = 0.03         # m median change over the window
+
+    def lidar_motion(self, now):
+        sc = self.scan
+        if sc is None:
+            return None
+        if not self._scan_hist or now - self._scan_hist[-1][0] >= 0.25:
+            self._scan_hist.append((now, sc.ranges))
+            self._scan_hist = [h for h in self._scan_hist if now - h[0] <= 1.6]
+        old = None
+        for t, r in self._scan_hist:
+            if now - t >= self.LIDAR_WINDOW:
+                old = r
+        if old is None or len(old) != len(sc.ranges):
+            return None
+        d = []
+        for a, b in zip(old, sc.ranges):
+            if a == a and b == b and a != float("inf") and b != float("inf"):
+                d.append(abs(a - b))
+        if len(d) < 50:
+            return None
+        d.sort()
+        return d[len(d) // 2]
 
     def speeds(self):
         if self.odom is None:
@@ -170,8 +213,13 @@ class CommandReceiver(Node):
         #      after WD_ZERO_GRACE s  -> the stop packet was lost: resend it
         self.WD_STALE = 1.0
         self.WD_ZERO_GRACE = 0.3
-        self.WD_MOVING_LIN = 0.02     # m/s   wheel-odom thresholds
-        self.WD_MOVING_ANG = 0.05     # rad/s
+        self.WD_MOVING_LIN = 0.02     # m/s   odom thresholds (odom is OPEN LOOP:
+        self.WD_MOVING_ANG = 0.05     # rad/s  it mirrors odom_publisher's last cmd)
+        self.WD_GYRO = 0.15           # rad/s  real rotation while commanded zero
+        self.WD_ZERO_RESEND = (0.15, 0.4, 0.8)   # s after a zero: resend it (lost-packet insurance)
+        self._wd_zero_at = 0.0
+        self._wd_zero_sent = 0
+        self._wd_world_since = 0.0
         self._wd_last_cmd_nonzero = False
         self._wd_last_cmd_time = 0.0
         self._wd_stale_fired = False
@@ -206,8 +254,13 @@ class CommandReceiver(Node):
     def _wd_cmd(self, msg):
         nz = (abs(msg.linear.x) > 1e-6 or abs(msg.linear.y) > 1e-6
               or abs(msg.angular.z) > 1e-6)
+        now = self._t.time()
+        if not nz and self._wd_last_cmd_nonzero:
+            # a stop after motion: schedule redundant zeros (see WD_ZERO_RESEND)
+            self._wd_zero_at = now
+            self._wd_zero_sent = 0
         self._wd_last_cmd_nonzero = nz
-        self._wd_last_cmd_time = self._t.time()
+        self._wd_last_cmd_time = now
         self._wd_stale_fired = False
 
     def _wd_stop(self, why, moving):
@@ -259,14 +312,34 @@ class CommandReceiver(Node):
         if now <= self._tele_until:
             return                                    # teleop heartbeat owns the base
         age = now - self._wd_last_cmd_time
+        # redundant zeros after a stop (only while nobody asked to move again)
+        if (not self._wd_last_cmd_nonzero and self._wd_zero_at
+                and self._wd_zero_sent < len(self.WD_ZERO_RESEND)
+                and now - self._wd_zero_at >= self.WD_ZERO_RESEND[self._wd_zero_sent]):
+            self._wd_zero_sent += 1
+            self.cmd_vel.publish(Twist())
         vx, vy, wz = self.sampler.speeds()
-        moving = (abs(vx) > self.WD_MOVING_LIN or abs(vy) > self.WD_MOVING_LIN
-                  or abs(wz) > self.WD_MOVING_ANG)
+        odom_moving = (abs(vx) > self.WD_MOVING_LIN or abs(vy) > self.WD_MOVING_LIN
+                       or abs(wz) > self.WD_MOVING_ANG)
+        # world-based motion: gyro (rotation) or lidar scene change (any motion),
+        # must persist >= 0.5 s to count
+        lm = self.sampler.lidar_motion(now)
+        world = (abs(self.sampler.gyro_z) > self.WD_GYRO
+                 or (lm is not None and lm > self.sampler.LIDAR_MOVING_M))
+        if world:
+            if self._wd_world_since == 0.0:
+                self._wd_world_since = now
+        else:
+            self._wd_world_since = 0.0
+        world_moving = world and now - self._wd_world_since >= 0.5
+        moving = odom_moving or world_moving
         if self._wd_last_cmd_nonzero and age > self.WD_STALE and not self._wd_stale_fired:
             self._wd_stale_fired = True               # -> our own zero re-arms via _wd_cmd
             self._wd_stop(f"no velocity command for {age:.1f}s while commanded to move", moving)
         elif not self._wd_last_cmd_nonzero and moving and age > self.WD_ZERO_GRACE:
-            self._wd_stop("wheels still turning after a zero/no command (lost stop packet?)", moving)
+            why = ("robot still moving after a zero/no command "
+                   f"(odom={odom_moving} gyro={self.sampler.gyro_z:.2f} lidar_d={lm if lm is None else round(lm, 3)})")
+            self._wd_stop(why, moving)
         elif not moving:
             self._wd_since = 0.0
 

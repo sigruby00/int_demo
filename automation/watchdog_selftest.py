@@ -23,7 +23,7 @@ RPS = 0.08 / (math.pi * 0.065)      # 0.08 m/s forward, mecanum.py convention
 class T(Node):
     def __init__(self):
         super().__init__("wd_selftest")
-        self.vx = None; self.front = None
+        self.vx = None; self.front = None; self.front_med = None
         self.create_subscription(Odometry, "/odom", lambda m: setattr(self, "vx", m.twist.twist.linear.x), 10)
         self.create_subscription(LaserScan, "/scan_raw", self._scan, 10)
         self.cmd = self.create_publisher(Twist, "/controller/cmd_vel", 10)
@@ -36,6 +36,10 @@ class T(Node):
             d = (math.degrees(m.angle_min + k * m.angle_increment) + 180) % 360 - 180
             if abs(d) <= 30: mn = min(mn, v)
         self.front = mn
+        med = sorted(v for k, v in enumerate(m.ranges)
+                     if not (math.isnan(v) or math.isinf(v))
+                     and abs((math.degrees(m.angle_min + k * m.angle_increment) + 180) % 360 - 180) <= 10)
+        self.front_med = med[len(med) // 2] if med else None
 
     def wait(self, s):
         t0 = time.time()
@@ -74,14 +78,19 @@ def main():
             pid = pid[0] if pid else None
             if not pid: print("odom_publisher pid not found"); return 2
             subprocess.run(["kill", "-STOP", pid]); print(f"  odom_publisher pid {pid} FROZEN (SIGSTOP)")
-        n.motors(RPS); print("  drove motors directly via set_motor (bypassing cmd_vel)")
+        f0 = n.front_med
+        n.motors(RPS); print(f"  drove motors directly via set_motor (bypassing cmd_vel); front median {f0:.3f} m")
+        # odom is open loop (mirrors cmd_vel), so judge by the lidar: a runaway at
+        # 0.08 m/s shortens the front median by ~8 cm/s; the watchdog needs ~1.5 s
+        # (0.5 s persistence + grace + resend) and L2 another 1.5 s.
         try:
-            if test == "t2":
-                n.wait(0.4); ok &= n.report("moving?", t0, False)
-                n.wait(0.8); ok &= n.report("zero-cmd grace -> stopped?", t0, True)
-            else:
-                n.wait(1.0); ok &= n.report("moving (L1 can't reach)?", t0, False)
-                n.wait(2.0); ok &= n.report("L2 set_motor -> stopped?", t0, True)
+            n.wait(4.0)
+            f1 = n.front_med; n.wait(2.0); f2 = n.front_med
+            moved = f0 - f1; still = f1 - f2
+            print(f"  t+4s front median {f1:.3f} (moved {moved*100:+.1f} cm)  t+6s {f2:.3f} (moved {still*100:+.1f} cm more)")
+            ok &= moved > 0.04            # it really ran away for a bit
+            ok &= abs(still) < 0.03       # ...and the watchdog stopped it
+            print("  " + ("OK" if ok else "FAIL"))
         finally:
             if pid:
                 subprocess.run(["kill", "-CONT", pid]); print(f"  odom_publisher {pid} resumed (SIGCONT)")
