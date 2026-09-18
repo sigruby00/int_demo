@@ -430,8 +430,12 @@ class CommandReceiver(Node):
                        or abs(wz) > self.WD_MOVING_ANG)
         # world-based motion: gyro (rotation) or lidar scene change (any motion),
         # must persist >= 0.5 s to count
+        # the lidar window (1 s) must lie entirely AFTER the last non-zero
+        # command, otherwise the scan taken while still driving under command
+        # makes a normal stop (mission waypoint dwell) look like a runaway
         world = (abs(self.sampler.gyro_z) > self.WD_GYRO
-                 or (lm is not None and lm > self.sampler.LIDAR_MOVING_M))
+                 or (lm is not None and lm > self.sampler.LIDAR_MOVING_M
+                     and age > self.sampler.LIDAR_WINDOW + 0.5))
         if world:
             if self._wd_world_since == 0.0:
                 self._wd_world_since = now
