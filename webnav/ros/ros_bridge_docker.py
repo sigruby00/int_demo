@@ -241,6 +241,16 @@ class CommandReceiver(Node):
         # take teleop + telemetry down with it. Lazy creation keeps the bridge up.
         self.nav_client = None
         self.cancel_cli = None        # /navigate_to_pose cancel service (lazy)
+        # mission continuity: remember the active nav2 goal so a watchdog stop
+        # (stall) can resume it instead of leaving the mission dead in the water
+        self._last_goal = None        # (x, y, yaw) of the last goto from the host
+        self._goal_active = False     # nav2 is (as far as we know) still pursuing it
+        self._goal_handle = None
+        self._goal_seq = 0            # tags each sent goal so late result callbacks
+        self._stall_resumes = 0       # of superseded goals are ignored
+        self.WD_STALL_MAX_RESUME = 3  # per goal; then leave it to the mission loop
+        self.WD_RESUME_AFTER = 2.0    # s pause before re-sending the goal
+        self._resume_timer = None
         # ---- teleop watchdog ------------------------------------------------
         # The base controller latches the last cmd_vel and has no timeout: if a
         # teleop "stop" is ever lost (missed keyup / closed page / dropped UDP),
@@ -397,11 +407,14 @@ class CommandReceiver(Node):
                 self._wd_stall_since = now
                 self._tele_until = 0.0; self._tele_idle = True
                 self.cmd_vel.publish(Twist())
-                self.cancel_nav("stall")
+                resume = self._goal_active and self._last_goal is not None
+                self.cancel_nav("stall", keep_goal=resume)
                 self.get_logger().warn(
                     f"base watchdog STALL: commanded lin={self._wd_last_lin:.2f} "
                     f"ang={self._wd_last_ang:.2f} for {self.WD_STALL:.0f}s but no motion "
                     f"(lidar_d={lm:.3f} gyro={self.sampler.gyro_z:.2f}) -> stop + cancel nav")
+                if resume:
+                    self._schedule_resume()
         else:
             self._wd_stall_since = 0.0
         if now <= self._tele_until:
@@ -497,9 +510,38 @@ class CommandReceiver(Node):
         self.initpose_pub.publish(msg)
         self.get_logger().info(f"set initial pose ({x:.2f}, {y:.2f}, {yaw:.2f})")
 
-    def cancel_nav(self, why=""):
+    def _schedule_resume(self):
+        if self._stall_resumes >= self.WD_STALL_MAX_RESUME:
+            self.get_logger().warn(
+                f"mission goal {self._last_goal[:2]} stalled {self._stall_resumes}x, "
+                "not resuming again (mission loop will move on)")
+            self._goal_active = False
+            return
+        self._stall_resumes += 1
+        if self._resume_timer is not None:
+            self._resume_timer.cancel()
+        self._resume_timer = self.create_timer(self.WD_RESUME_AFTER, self._resume_goal)
+
+    def _resume_goal(self):
+        if self._resume_timer is not None:
+            self._resume_timer.cancel(); self._resume_timer = None
+        if self._last_goal is None or not self._goal_active:
+            return
+        x, y, yaw = self._last_goal
+        self.get_logger().warn(
+            f"resuming mission goal ({x:.2f}, {y:.2f}) after stall "
+            f"({self._stall_resumes}/{self.WD_STALL_MAX_RESUME})")
+        self._send_goal(x, y, yaw, resume=True)
+
+    def cancel_nav(self, why="", keep_goal=False):
         """Cancel EVERY active NavigateToPose goal (empty goal_info = all), not
-        only the ones we sent: otherwise nav2 keeps overriding any stop at 20 Hz."""
+        only the ones we sent: otherwise nav2 keeps overriding any stop at 20 Hz.
+        keep_goal=True (watchdog stall) keeps the goal marked active so it can
+        be resumed; a user stop/cancel drops it."""
+        if not keep_goal:
+            self._goal_active = False
+            if self._resume_timer is not None:
+                self._resume_timer.cancel(); self._resume_timer = None
         if self.cancel_cli is None:
             self.cancel_cli = self.create_client(
                 CancelGoal, "/navigate_to_pose/_action/cancel_goal")
@@ -509,7 +551,14 @@ class CommandReceiver(Node):
         self.get_logger().info(f"cancelled nav2 goals ({why})")
         return True
 
-    def _send_goal(self, x, y, yaw=0.0):
+    def _send_goal(self, x, y, yaw=0.0, resume=False):
+        if not resume:                            # a NEW goal from the host
+            self._last_goal = (x, y, yaw)
+            self._stall_resumes = 0
+            if self._resume_timer is not None:
+                self._resume_timer.cancel(); self._resume_timer = None
+        self._goal_active = True
+        self._goal_seq += 1
         if self.nav_client is None:
             try:
                 self.nav_client = ActionClient(self, NavigateToPose, "navigate_to_pose")
@@ -528,8 +577,32 @@ class CommandReceiver(Node):
         p.pose.orientation.z = math.sin(yaw / 2.0)
         p.pose.orientation.w = math.cos(yaw / 2.0)
         goal.pose = p
-        self.nav_client.send_goal_async(goal)
-        self.get_logger().info(f"goto ({x:.2f}, {y:.2f})")
+        fut = self.nav_client.send_goal_async(goal)
+        seq = self._goal_seq
+        fut.add_done_callback(lambda f, seq=seq: self._goal_sent(f, seq))
+        self.get_logger().info(f"goto ({x:.2f}, {y:.2f})" + (" [resume]" if resume else ""))
+
+    def _goal_sent(self, fut, seq):
+        try:
+            gh = fut.result()
+        except Exception as e:
+            self.get_logger().warn(f"goal send failed: {e}")
+            if seq == self._goal_seq: self._goal_active = False
+            return
+        if not gh.accepted:
+            self.get_logger().warn("goal rejected by nav2")
+            if seq == self._goal_seq: self._goal_active = False
+            return
+        self._goal_handle = gh
+        gh.get_result_async().add_done_callback(lambda f, seq=seq: self._goal_done(seq))
+
+    def _goal_done(self, seq):
+        # result callback fires for success, abort AND cancel; ignore results of
+        # superseded goals, and keep a goal resumable while a stall-resume is pending
+        if seq != self._goal_seq:
+            return
+        if self._resume_timer is None:
+            self._goal_active = False
 
 
 def main():
