@@ -21,3 +21,16 @@ runs `q_to_video_receiver_nict.sh` (or the plain one) in tmux session `to_video`
 on DISPLAY=:0, and registers itself `@reboot`. TO7 uses `plain`, the others `nict` (as found running).
 Log: `/tmp/q_to_video.log`. Never `pkill -f` these names from an inline ssh command: the pattern
 matches the ssh shell itself and kills your session (happened twice).
+
+## Restarting the reporter safely (2026-09-23)
+
+The resilient loops (`tmux to_recv`, TO3's `to_recv_loop`) carry the script name in their own
+command line, so `pkill -f q_to_udp_receiver_adv_adv` kills the LOOP as well and nothing
+respawns. Kill only the python process with an anchored pattern, then the loop relaunches it:
+
+    pkill -f '^python3 -u .*q_to_udp_receiver_adv_adv'      # loop restarts it within 3 s
+
+If the loop is gone anyway: `~/to_recv/run_to_recv.sh` (TO3: `run_to_recv_notmux.sh`).
+
+Cadence since 2026-09-23: throughput window 1 s, delay/jitter averaged over 1 s -> one
+`robot_pf_data` row per second per TO (8 rows/s fleet-wide, ~65 MB/day in postgres).
