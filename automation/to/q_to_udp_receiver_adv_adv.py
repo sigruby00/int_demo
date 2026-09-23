@@ -104,7 +104,7 @@ def get_throughput(interval=5, iface=None):
 
 
 # ──────────────────────────────────────────────
-def udp_server(host="0.0.0.0", port=5001, buffer_size=65535, avg_interval=10):
+def udp_server(host="0.0.0.0", port=5001, buffer_size=65535, avg_interval=1):
     """
     간단한 UDP 서버
     - per-packet 지연 계산
@@ -193,7 +193,7 @@ if __name__ == "__main__":
     threading.Thread(target=udp_server, kwargs={"port": 6001}, daemon=True).start()
 
     iface = "enp1s0"  # 모니터링할 인터페이스 (None이면 전체)
-    interval = 10  # throughput 측정 주기(초)
+    interval = 1  # throughput 측정 주기(초) — 1 s fleet-wide cadence (2026-09-23)
 
     while True:
         recv, sent = get_throughput(interval, iface)
