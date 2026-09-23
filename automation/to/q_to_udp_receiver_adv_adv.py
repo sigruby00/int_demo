@@ -55,17 +55,32 @@ def reconnect_socket():
                 return True
             except Exception as e:
                 print(f"Reconnect attempt {i+1} failed: {e}")
-                # python-socketio can get stuck "not in a disconnected state" after the
-                # server restarts: force a clean disconnect before the next attempt
-                try:
-                    sio.disconnect()
-                except Exception:
-                    pass
+                # python-socketio wedges after a server restart ("not in a disconnected
+                # state", "namespaces failed to connect"): a connection made after one
+                # of these can look connected while its events never reach the server
+                # (seen on TO1/TO7 2026-09-24). Exiting lets the runner start a clean
+                # process, which connects first try.
+                if "disconnected state" in str(e) or "namespaces failed" in str(e):
+                    print("-> wedged client, exiting so the runner restarts a clean process")
+                    os._exit(1)
                 time.sleep(3)
         print("❌ Failed to reconnect after handover -> exiting so the runner restarts a clean process")
         os._exit(1)
     finally:
         is_connecting = False
+
+
+# liveness: every report is emitted with an ack callback; if the server has not
+# acked anything for ACK_STALE_S while we believe we are connected, the session
+# is a zombie -> exit and let the runner restart a clean process.
+ACK_STALE_S = 30
+last_ack = time.time()
+last_emit = 0.0
+
+
+def _on_ack(*_):
+    global last_ack
+    last_ack = time.time()
 
 
 def socketio_reconnect_watchdog():
@@ -74,6 +89,9 @@ def socketio_reconnect_watchdog():
             print("[Watchdog] Socket.IO not connected. Trying to reconnect...")
             reconnect_socket()
             time.sleep(10)  # 재시도 간격 늘려줌
+        elif last_emit > last_ack and (time.time() - last_ack) > ACK_STALE_S:
+            print(f"[Watchdog] connected but no server ack for {time.time() - last_ack:.0f}s -> exiting for a clean restart")
+            os._exit(1)
         time.sleep(3)
 
 
@@ -226,4 +244,8 @@ if __name__ == "__main__":
         print(pf_data)
 
         if sio.connected:
-            sio.emit("robot_pf_data", pf_data)
+            try:
+                sio.emit("robot_pf_data", pf_data, callback=_on_ack)
+                last_emit = time.time()
+            except Exception as e:
+                print(f"[emit] failed: {e}")
