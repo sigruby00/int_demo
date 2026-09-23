@@ -255,12 +255,23 @@ def video_meter_loop():
                 video_meter["ok"] = True
             if b is not None:
                 video_meter["bytes"], video_meter["t"], video_meter["ts"] = b, t, int(t)
+            # actual udpgen rate over the last second (payload bytes -> +UDP/IP headers ~3.5 %)
+            if udpgen is not None:
+                sb = udpgen.sent_bytes
+                if _TOTAL.get("sb_last") is not None and t > _TOTAL.get("sb_t", 0):
+                    actual = (sb - _TOTAL["sb_last"]) * (1 + 28.0 / udpgen.packet_size) * 8.0 / (t - _TOTAL["sb_t"]) / 1e6
+                    _TOTAL["udp_actual"] = _TOTAL.get("udp_actual", actual) * 0.5 + actual * 0.5
+                    # closed loop: nudge the calibration so actual -> nominal (bounded, slow)
+                    if udpgen.enabled and udpgen.mbps > 0.5 and _TOTAL["udp_actual"] > 0.1:
+                        udpgen.calib = max(0.5, min(2.5, udpgen.calib * (udpgen.mbps / _TOTAL["udp_actual"]) ** 0.3))
+                        udpgen.set_rate(udpgen.mbps, quiet=True)
+                _TOTAL["sb_last"], _TOTAL["sb_t"] = sb, t
             if _TOTAL["mode"] == "total" and udpgen is not None and udpgen.enabled:
                 want = max(0.2, min(100.0, _TOTAL["target"] - (video_meter["mbps"] if video_meter["ok"] else 0.0)))
                 if _TOTAL["udp_set"] is None or abs(want - _TOTAL["udp_set"]) > 0.15:
                     udpgen.set_rate(want, quiet=True); _TOTAL["udp_set"] = want
             _TOTAL["total_mbps"] = round((video_meter["mbps"] if video_meter["ok"] else 0.0)
-                                         + (udpgen.mbps if udpgen and udpgen.enabled else 0.0), 2)
+                                         + (_TOTAL.get("udp_actual", udpgen.mbps) if udpgen and udpgen.enabled else 0.0), 2)
         except Exception as e:
             print(f"[Total] meter error: {e}")
         time.sleep(1.0)
@@ -274,7 +285,9 @@ class UDPGenerator(threading.Thread):
         self.iface = USE_INTERFACE_ETH
         self.packet_size = 1200
         self.mbps = UDP_BITRATE_MBPS
+        self.calib = 1.0              # >1 shortens the sleep: compensates sleep()/loop overhead
         self.interval = (self.packet_size * 8) / (UDP_BITRATE_MBPS * 1e6)
+        self.sent_bytes = 0           # for the closed-loop rate check (video_meter_loop)
         self.enabled = True           # dashboard traffic control (udp on/off)
         self.lock = threading.Lock()
         self.sock = None  # 소켓 멤버 유지
@@ -284,7 +297,7 @@ class UDPGenerator(threading.Thread):
         mbps = max(0.1, min(100.0, float(mbps)))
         with self.lock:
             self.mbps = mbps
-            self.interval = (self.packet_size * 8) / (mbps * 1e6)
+            self.interval = (self.packet_size * 8) / (mbps * 1e6) / self.calib
         if not quiet:
             print(f"[UDP] rate -> {mbps:.2f} Mbps (interval {self.interval*1000:.3f} ms)")
         return mbps
@@ -328,7 +341,7 @@ class UDPGenerator(threading.Thread):
                 payload = ts_bytes + os.urandom(self.packet_size - 8)
                 # send loop
                 self.sock.sendto(payload, dst)
-                # self.sock.sendto(os.urandom(self.packet_size), dst)
+                self.sent_bytes += len(payload)
                 time.sleep(self.interval)
             except Exception as e:
                 # e.g. ENETUNREACH after the wlan0 host-route vanished (NM
@@ -667,7 +680,8 @@ def _traffic_state():
         "udp": bool(udpgen and udpgen.enabled),
         "mbps": round(_TOTAL["target"], 2) if _TOTAL["mode"] == "total" else (round(udpgen.mbps, 2) if udpgen else None),
         "mode": _TOTAL["mode"],
-        "udp_mbps": round(udpgen.mbps, 2) if udpgen else None,
+        "udp_mbps": round(_TOTAL.get("udp_actual", udpgen.mbps), 2) if udpgen else None,
+        "udp_calib": round(udpgen.calib, 3) if udpgen else None,
         "video_mbps": round(video_meter["mbps"], 2) if video_meter["ok"] else None,
         "total_mbps": _TOTAL["total_mbps"],
     }
