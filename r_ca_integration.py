@@ -585,6 +585,7 @@ def _compact_status():
                    "lap": rep.get("lap")},
         "camera": s.get("camera"),
         "traffic": _traffic_state(),
+        "rssi": wifi_rssi,
     }
 
 
@@ -791,6 +792,7 @@ def get_request(data):
 # The server drives this over OUR socket.io link (not OCACDB) with `set_uplink`.
 # ===========================================================================
 ROBOT_WIFI_SSID = "wifi_ap"
+WIFI1_BSSID = "84:E8:CB:83:86:A2"        # module Wi-Fi AP (OCACDB NW-IF type 3)
 ROBOT_WIFI_BSSID = "84:E8:CB:3A:C5:62"   # robot's own Wi-Fi target (WiFi2)
 ROBOT_WIFI_GW = "10.100.61.141"          # WiFi2 gateway
 ROBOT_WIFI_DNS = "8.8.8.8"
@@ -971,6 +973,47 @@ def scan_loop():
             print(f"[Scan] error: {e}")
             time.sleep(2)
 
+# ---- Wi-Fi RSSI of the two candidate APs (WiFi1 / WiFi2) for the server's
+# RSSI / NeuroRAT decisions. Read from NetworkManager's scan cache (no rescan,
+# no sudo) so the data path is never pulled off-channel. dBm ~= signal%/2 - 100.
+WIFI_RSSI_PERIOD_S = 10.0
+wifi_rssi = {"wifi1": None, "wifi2": None, "assoc": None, "ts": 0}
+
+
+def _read_wifi_rssi():
+    out = subprocess.run(["nmcli", "-t", "-f", "BSSID,SIGNAL,ACTIVE", "dev", "wifi", "list",
+                          "--rescan", "no"], capture_output=True, text=True, timeout=8).stdout
+    want = {ROBOT_WIFI_BSSID.lower(): "wifi2", WIFI1_BSSID.lower(): "wifi1"}
+    res = {"wifi1": None, "wifi2": None, "assoc": None, "ts": int(time.time())}
+    for line in out.splitlines():
+        # nmcli escapes ':' in the BSSID as '\:'
+        parts = line.replace("\\:", "|").split(":")
+        if len(parts) < 3:
+            continue
+        bssid = parts[0].replace("|", ":").lower()
+        key = want.get(bssid)
+        if not key:
+            continue
+        try:
+            pct = int(parts[1])
+        except ValueError:
+            continue
+        res[key] = round(pct / 2.0 - 100.0, 1)
+        if parts[2].strip().lower() == "yes":
+            res["assoc"] = key
+    return res
+
+
+def wifi_rssi_loop():
+    global wifi_rssi
+    while True:
+        try:
+            wifi_rssi = _read_wifi_rssi()
+        except Exception as e:
+            print(f"[RSSI] read failed: {e}")
+        time.sleep(WIFI_RSSI_PERIOD_S)
+
+
 def camera_keepalive_loop():
     """Relaunch the camera stream if it died while enabled (device busy at
     startup, USB hiccup, ...). Checks every 5 s."""
@@ -1014,6 +1057,7 @@ def main():
     threading.Thread(target=scan_loop, daemon=True).start()
     threading.Thread(target=status_forward_loop, daemon=True).start()  # central dashboard
     threading.Thread(target=camera_keepalive_loop, daemon=True).start()
+    threading.Thread(target=wifi_rssi_loop, daemon=True).start()
 
     # stop the camera child on SIGTERM/SIGINT: a restart of this process must
     # not leave an orphan gst-launch holding /dev/video2 (the new instance
