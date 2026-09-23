@@ -272,7 +272,18 @@ class UDPGenerator(threading.Thread):
                 # self.sock.sendto(os.urandom(self.packet_size), dst)
                 time.sleep(self.interval)
             except Exception as e:
-                print(f"[UDP] Error: {e}")
+                # e.g. ENETUNREACH after the wlan0 host-route vanished (NM
+                # re-activation drops manual routes) or EBADF after update():
+                # drop the socket so the next iteration re-binds on the
+                # interface the current uplink path wants.
+                print(f"[UDP] Error: {e} -> re-bind")
+                with self.lock:
+                    try:
+                        if self.sock:
+                            self.sock.close()
+                    except Exception:
+                        pass
+                    self.sock = None
                 time.sleep(1)
 
     def stop(self):
@@ -586,6 +597,7 @@ def _compact_status():
         "camera": s.get("camera"),
         "traffic": _traffic_state(),
         "rssi": wifi_rssi,
+        "uplink": uplink_path,
     }
 
 
@@ -846,6 +858,59 @@ def ensure_wlan_connected(ssid, bssid, password=None):
         return False
 
 
+uplink_path = "l5g"            # last applied path: l5g | wifi1 | wifi2
+UPLINK_GUARD_S = 5.0
+UPLINK_WIFI2_GRACE_S = 30.0    # wlan0 down this long while on wifi2 -> fall back to eth0
+
+
+def _wlan0_route_ok():
+    got = sh(["ip", "route", "get", TARGET_TO_IP], check=False, capture=True) or ""
+    return "dev wlan0" in got and get_ip_from_interface(USE_INTERFACE_WLAN) == ROBOT_WIFI_IP
+
+
+def uplink_guard_loop():
+    """While on wifi2: re-add the wlan0 host route if NetworkManager dropped it
+    (it does on re-activation) and re-associate if needed; after
+    UPLINK_WIFI2_GRACE_S without a usable wlan0, fall back to eth0 and tell
+    the server (uplink_ack ok=False) so its state follows reality."""
+    global uplink_path
+    lost_since = None
+    while True:
+        time.sleep(UPLINK_GUARD_S)
+        try:
+            if uplink_path != "wifi2":
+                lost_since = None
+                continue
+            if _wlan0_route_ok():
+                lost_since = None
+                continue
+            if get_ip_from_interface(USE_INTERFACE_WLAN) == ROBOT_WIFI_IP:
+                print("[Uplink] wifi2: wlan0 up but host-route missing -> re-adding")
+                route_replace_host(TARGET_TO_IP, USE_INTERFACE_WLAN)
+                udpgen.update(iface=USE_INTERFACE_WLAN)
+                continue
+            lost_since = lost_since or time.time()
+            print(f"[Uplink] wifi2: wlan0 not usable for {int(time.time() - lost_since)}s")
+            if time.time() - lost_since < UPLINK_WIFI2_GRACE_S:
+                try:
+                    ensure_wlan_connected(ROBOT_WIFI_SSID, ROBOT_WIFI_BSSID, ROBOT_WIFI_PASSWORD)
+                except Exception as e:
+                    print(f"[Uplink] re-associate failed: {e}")
+                continue
+            print("[Uplink] wifi2 lost -> falling back to eth0 (module path)")
+            sh(["sudo", "ip", "route", "del", f"{TARGET_TO_IP}/32"], check=False)
+            udpgen.update(iface=USE_INTERFACE_ETH)
+            if camera:
+                camera.start(iface=USE_INTERFACE_ETH, bind_ip=get_ip_from_interface(USE_INTERFACE_ETH))
+            uplink_path = "l5g"
+            lost_since = None
+            sio.emit("uplink_ack", {"robot_id": str(robot_id), "path": "wifi2", "ok": False,
+                                    "detail": "wifi2 lost -> fallback to module path (l5g/wifi1)",
+                                    "fallback": "l5g"})
+        except Exception as e:
+            print(f"[Uplink] guard error: {e}")
+
+
 @sio.event
 def set_uplink(data):
     """Switch the robot's data uplink path (robot_id-filtered).
@@ -881,6 +946,7 @@ def set_uplink(data):
             pass
         got = sh(["ip", "route", "get", TARGET_TO_IP], check=False, capture=True)
         print(f"[Uplink] path={path} -> data via {iface} (ip={ip}) route={got}")
+        globals()["uplink_path"] = path
         sio.emit("uplink_ack", {"robot_id": str(robot_id), "path": path,
                                 "iface": iface, "ip": ip, "ok": True})
     except Exception as e:
@@ -1058,6 +1124,7 @@ def main():
     threading.Thread(target=status_forward_loop, daemon=True).start()  # central dashboard
     threading.Thread(target=camera_keepalive_loop, daemon=True).start()
     threading.Thread(target=wifi_rssi_loop, daemon=True).start()
+    threading.Thread(target=uplink_guard_loop, daemon=True).start()
 
     # stop the camera child on SIGTERM/SIGINT: a restart of this process must
     # not leave an orphan gst-launch holding /dev/video2 (the new instance
