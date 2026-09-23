@@ -3,6 +3,7 @@ import threading
 import socket
 import psutil
 import time
+import os
 import math
 import struct
 import socketio  # pip install "python-socketio[client]"
@@ -54,9 +55,15 @@ def reconnect_socket():
                 return True
             except Exception as e:
                 print(f"Reconnect attempt {i+1} failed: {e}")
+                # python-socketio can get stuck "not in a disconnected state" after the
+                # server restarts: force a clean disconnect before the next attempt
+                try:
+                    sio.disconnect()
+                except Exception:
+                    pass
                 time.sleep(3)
-        print("❌ Failed to reconnect after handover.")
-        return False
+        print("❌ Failed to reconnect after handover -> exiting so the runner restarts a clean process")
+        os._exit(1)
     finally:
         is_connecting = False
 
