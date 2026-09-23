@@ -255,11 +255,11 @@ def video_meter_loop():
                 video_meter["ok"] = True
             if b is not None:
                 video_meter["bytes"], video_meter["t"], video_meter["ts"] = b, t, int(t)
-            # actual udpgen rate over the last second (payload bytes -> +UDP/IP headers ~3.5 %)
+            # actual udpgen rate over the last second (payload bytes -> +Ethernet/IP/UDP headers, 42 B, as the TO NIC counts them)
             if udpgen is not None:
                 sb = udpgen.sent_bytes
                 if _TOTAL.get("sb_last") is not None and t > _TOTAL.get("sb_t", 0):
-                    actual = (sb - _TOTAL["sb_last"]) * (1 + 28.0 / udpgen.packet_size) * 8.0 / (t - _TOTAL["sb_t"]) / 1e6
+                    actual = (sb - _TOTAL["sb_last"]) * (1 + 42.0 / udpgen.packet_size) * 8.0 / (t - _TOTAL["sb_t"]) / 1e6
                     _TOTAL["udp_actual"] = _TOTAL.get("udp_actual", actual) * 0.5 + actual * 0.5
                     # closed loop: nudge the calibration so actual -> nominal (bounded, slow)
                     if udpgen.enabled and udpgen.mbps > 0.5 and _TOTAL["udp_actual"] > 0.1:
