@@ -62,6 +62,11 @@ CAMERA_PORT = 5000
 CAMERA_TO_STREAM = True     # H.264 (/dev/video2) -> TO:5000 for the TO-side GStreamer screen
 UDP_PORT = 6001
 UDP_BITRATE_MBPS = 10.0
+# Constant TOTAL uplink load: camera (H.264, varies with scene brightness) + udpgen
+# are kept at TOTAL_TARGET_MBPS by re-tuning udpgen every second to fill what the
+# camera is not using. The dashboard "Mbps" sets this total when TRAFFIC_MODE="total".
+TOTAL_TARGET_MBPS = 15.0
+TRAFFIC_MODE = "total"          # "total" (camera+udp = target) | "udp" (udpgen fixed rate)
 TARGET_TO_IP = next((item['to_ip'] for item in TO_IP_LIST if item['to_id'] == to_id), None)
 
 # 인터페이스별 GW 오버라이드
@@ -211,6 +216,56 @@ class CameraStreamer:
                     self.proc.kill()
             self.proc = None
 
+# ----------- Video byte meter + constant-total controller ----------------
+video_meter = {"mbps": 0.0, "ts": 0.0, "bytes": None, "t": None, "ok": False}
+_TOTAL = {"target": TOTAL_TARGET_MBPS, "mode": TRAFFIC_MODE, "udp_set": None, "total_mbps": 0.0}
+
+
+def _video_rule_args():
+    return ["OUTPUT", "-p", "udp", "-d", TARGET_TO_IP, "--dport", str(CAMERA_PORT), "-j", "ACCEPT"]
+
+
+def _video_bytes():
+    """Bytes the camera stream sent to TO:CAMERA_PORT, from an iptables counter
+    (no extra hop, no sudo password: robots have passwordless sudo)."""
+    chk = subprocess.run(["sudo", "-n", "iptables", "-w", "-C"] + _video_rule_args(),
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if chk.returncode != 0:
+        subprocess.run(["sudo", "-n", "iptables", "-w", "-I"] + _video_rule_args()[:1] + ["1"] + _video_rule_args()[1:],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    out = subprocess.run(["sudo", "-n", "iptables", "-w", "-L", "OUTPUT", "-v", "-x", "-n"],
+                         capture_output=True, text=True, timeout=5).stdout
+    for line in out.splitlines():
+        if f"dpt:{CAMERA_PORT}" in line and TARGET_TO_IP in line and "udp" in line:
+            parts = line.split()
+            return int(parts[1])
+    return None
+
+
+def video_meter_loop():
+    """1 s: video Mbps (EWMA 3 s); then in total mode set udpgen = target - video."""
+    global video_meter
+    alpha = 1.0 / 3.0
+    while True:
+        try:
+            b = _video_bytes(); t = time.time()
+            if b is not None and video_meter["bytes"] is not None and t > video_meter["t"]:
+                inst = max(0.0, (b - video_meter["bytes"]) * 8.0 / (t - video_meter["t"]) / 1e6)
+                video_meter["mbps"] = video_meter["mbps"] + alpha * (inst - video_meter["mbps"])
+                video_meter["ok"] = True
+            if b is not None:
+                video_meter["bytes"], video_meter["t"], video_meter["ts"] = b, t, int(t)
+            if _TOTAL["mode"] == "total" and udpgen is not None and udpgen.enabled:
+                want = max(0.2, min(100.0, _TOTAL["target"] - (video_meter["mbps"] if video_meter["ok"] else 0.0)))
+                if _TOTAL["udp_set"] is None or abs(want - _TOTAL["udp_set"]) > 0.15:
+                    udpgen.set_rate(want, quiet=True); _TOTAL["udp_set"] = want
+            _TOTAL["total_mbps"] = round((video_meter["mbps"] if video_meter["ok"] else 0.0)
+                                         + (udpgen.mbps if udpgen and udpgen.enabled else 0.0), 2)
+        except Exception as e:
+            print(f"[Total] meter error: {e}")
+        time.sleep(1.0)
+
+
 # ----------- UDP Generator ------------------------
 class UDPGenerator(threading.Thread):
     def __init__(self):
@@ -224,13 +279,14 @@ class UDPGenerator(threading.Thread):
         self.lock = threading.Lock()
         self.sock = None  # 소켓 멤버 유지
 
-    def set_rate(self, mbps):
+    def set_rate(self, mbps, quiet=False):
         """Change the generated bitrate (Mbps) on the fly; clamped 0.1..100."""
         mbps = max(0.1, min(100.0, float(mbps)))
         with self.lock:
             self.mbps = mbps
             self.interval = (self.packet_size * 8) / (mbps * 1e6)
-        print(f"[UDP] rate -> {mbps:.2f} Mbps (interval {self.interval*1000:.3f} ms)")
+        if not quiet:
+            print(f"[UDP] rate -> {mbps:.2f} Mbps (interval {self.interval*1000:.3f} ms)")
         return mbps
 
     def update(self, iface):
@@ -609,7 +665,11 @@ def _traffic_state():
         "camera": bool(camera and camera.enabled),
         "camera_running": bool(camera and camera.running()),
         "udp": bool(udpgen and udpgen.enabled),
-        "mbps": round(udpgen.mbps, 2) if udpgen else None,
+        "mbps": round(_TOTAL["target"], 2) if _TOTAL["mode"] == "total" else (round(udpgen.mbps, 2) if udpgen else None),
+        "mode": _TOTAL["mode"],
+        "udp_mbps": round(udpgen.mbps, 2) if udpgen else None,
+        "video_mbps": round(video_meter["mbps"], 2) if video_meter["ok"] else None,
+        "total_mbps": _TOTAL["total_mbps"],
     }
 
 
@@ -636,8 +696,15 @@ def traffic_control(data):
             want = data["udp"] == "on"
             udpgen.enabled = want
             detail.append(f"udp {'on' if want else 'off'}")
+        if data.get("mode") in ("total", "udp"):
+            _TOTAL["mode"] = data["mode"]; _TOTAL["udp_set"] = None
+            detail.append(f"mode {data['mode']}")
         if data.get("mbps") is not None:
-            detail.append(f"udp {udpgen.set_rate(data['mbps']):.2f} Mbps")
+            if _TOTAL["mode"] == "total":
+                _TOTAL["target"] = max(0.5, min(100.0, float(data["mbps"]))); _TOTAL["udp_set"] = None
+                detail.append(f"total target {_TOTAL['target']:.2f} Mbps (camera+udp)")
+            else:
+                detail.append(f"udp {udpgen.set_rate(data['mbps']):.2f} Mbps")
     except Exception as e:
         ok = False; detail.append(str(e))
     print(f"[Traffic] {data} -> {ok} {detail}")
@@ -1128,6 +1195,7 @@ def main():
     threading.Thread(target=camera_keepalive_loop, daemon=True).start()
     threading.Thread(target=wifi_rssi_loop, daemon=True).start()
     threading.Thread(target=uplink_guard_loop, daemon=True).start()
+    threading.Thread(target=video_meter_loop, daemon=True).start()
 
     # stop the camera child on SIGTERM/SIGINT: a restart of this process must
     # not leave an orphan gst-launch holding /dev/video2 (the new instance
