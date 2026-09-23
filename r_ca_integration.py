@@ -252,6 +252,9 @@ class UDPGenerator(threading.Thread):
                 with self.lock:
                     if self.sock is None:
                         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        # never block forever on a stalled link (wlan0 hiccup): a send
+                        # that waits > 1 s raises and the socket is re-bound
+                        self.sock.settimeout(1.0)
                         # SO_BINDTODEVICE: 해당 NIC로 강제 송신 (linux에서 번호 25)
                         self.sock.setsockopt(socket.SOL_SOCKET, 25, bytes(f"{self.iface}\0", "utf-8"))
                         ip = get_ip_from_interface(self.iface)
