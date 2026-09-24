@@ -10,8 +10,9 @@ import time
 
 from config import settings
 
-ARRIVE_RADIUS = 0.35        # m: within this of a waypoint counts as "arrived"
+ARRIVE_RADIUS = 0.5         # m: within this of a waypoint counts as "arrived" (nav2 tol. 0.25)
 WAYPOINT_TIMEOUT = 90.0     # s: give up on a waypoint after this long
+MISSION_RETRIES = 2         # re-send a goal nav2 aborted/stalled this many times before moving on
 
 
 class Control:
@@ -122,17 +123,25 @@ class Control:
                     tag = f" (lap {lap})" if loop else ""
                     self._mission.update({"index": i, "target": name,
                                           "message": f"going to {name} ({i+1}/{len(route)}){tag}"})
-                    try:
-                        self.goto_xy(wp["x"], wp["y"])
-                        arrived = self._wait_arrival(wp["x"], wp["y"])
-                    except Exception as e:                # never let one hop kill the loop
-                        self._mission.update({"message": f"error at {name}: {e}"})
-                        arrived = False
-                    if not arrived:
+                    outcome, attempt = "failed", 0
+                    while True:
+                        try:
+                            outcome = self._goto_and_wait(wp["x"], wp["y"])
+                        except Exception as e:            # never let one hop kill the loop
+                            self._mission.update({"message": f"error at {name}: {e}"})
+                            outcome = "failed"
+                        # nav2 gave up (abort / rejected / stalled): re-send instead of idling
+                        if outcome == "failed" and attempt < MISSION_RETRIES and not self._mission_stop.is_set():
+                            attempt += 1
+                            self._mission.update({"message": f"{name}: nav2 gave up, retry {attempt}/{MISSION_RETRIES}"})
+                            time.sleep(1.0)
+                            continue
+                        break
+                    if outcome != "arrived":
                         self.cancel_goal()            # never leave a stale goal running
                         if self._mission_stop.is_set():
                             break
-                        self._mission.update({"message": f"timeout at {name}, continuing"})
+                        self._mission.update({"message": f"{outcome} at {name}, continuing"})
                         continue
                     self._mission.update({"message": f"reached {name}"})
                     time.sleep(1.0)     # brief dwell at each waypoint
@@ -145,18 +154,33 @@ class Control:
             self._mission.update({"running": False, "target": None,
                                   "message": "route complete" if done else "stopped"})
 
-    def _wait_arrival(self, gx, gy):
-        t0 = time.time()
+    def _goto_and_wait(self, gx, gy):
+        """Send the goal and wait for it. Returns 'arrived' | 'failed' | 'timeout' | 'stopped'.
+        Arrival = pose within ARRIVE_RADIUS OR nav2 reporting success for this
+        goal; 'failed' = nav2 aborted/rejected the goal or the stall watchdog gave
+        up on it (the bridge reports goal results in its telemetry)."""
+        pre = ((self.bridge.get_state() or {}).get("goal") or {}).get("seq", 0)
+        self.goto_xy(gx, gy)
+        t0 = time.time(); myseq = None
         while time.time() - t0 < WAYPOINT_TIMEOUT:
             if self._mission_stop.is_set():
-                return False
+                return "stopped"
             st = self.bridge.get_state() or {}
             x, y = st.get("x"), st.get("y")
             if x is not None and y is not None and \
                ((x - gx) ** 2 + (y - gy) ** 2) ** 0.5 <= ARRIVE_RADIUS:
-                return True
+                return "arrived"
+            g = st.get("goal") or {}
+            if myseq is None and g.get("seq", 0) > pre:
+                myseq = g["seq"]                      # the bridge picked up our goal
+            if myseq is not None and g.get("seq") == myseq and not g.get("active"):
+                r = g.get("result")
+                if r == "succeeded":
+                    return "arrived"
+                if r in ("aborted", "rejected", "send_failed", "stalled", "canceled") or (r or "").startswith("status"):
+                    return "failed"
             time.sleep(0.4)
-        return False
+        return "timeout"
 
     # ---- SLAM map selection ---------------------------------------------
     def list_maps(self):

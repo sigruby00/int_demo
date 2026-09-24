@@ -92,6 +92,8 @@ class Sampler(Node):
         # AMCL (/amcl_pose) and slam_toolbox (/pose) publish map->base at their
         # update instants; we propagate it with the odom delta since then.
         self.loc = None           # (t_sec, x, y, yaw) map->base_footprint at t
+        # nav2 goal bookkeeping shared with PoseSender (telemetry -> host mission loop)
+        self.goal = {"seq": 0, "active": False, "result": None, "resumes": 0, "ts": 0.0}
         self._odom_hist = []      # [(t_sec, x, y, yaw)] ~10 Hz, last 3 s
         # one volatile + one transient_local subscription per topic: a latched
         # publisher (AMCL) only matches the latter, and it hands us the last
@@ -220,7 +222,8 @@ class PoseSender(Node):
             pass
         vx, _, wz = self.sampler.speeds()
         imu = {"linear_speed": vx, "angular_speed": wz, "angular_velocity_z": wz}
-        payload = {"pos": self.pos, "imu": imu, "battery": self.sampler.battery}
+        payload = {"pos": self.pos, "imu": imu, "battery": self.sampler.battery,
+                   "goal": self.sampler.goal}
         try:
             self.sock.sendto(json.dumps(payload).encode(), (HOST_IP, TELEMETRY_PORT))
         except OSError:
@@ -514,12 +517,25 @@ class CommandReceiver(Node):
         self.initpose_pub.publish(msg)
         self.get_logger().info(f"set initial pose ({x:.2f}, {y:.2f}, {yaw:.2f})")
 
+
+    def _goal_state(self, active=None, result=None):
+        """Publish nav2 goal progress to the host (via PoseSender telemetry) so the
+        mission loop reacts to success/abort at once instead of waiting 90 s."""
+        g = self.sampler.goal
+        g["seq"] = self._goal_seq
+        g["resumes"] = self._stall_resumes
+        if active is not None:
+            g["active"] = bool(active)
+        g["result"] = result
+        g["ts"] = time.time()
+
     def _schedule_resume(self):
         if self._stall_resumes >= self.WD_STALL_MAX_RESUME:
             self.get_logger().warn(
                 f"mission goal {self._last_goal[:2]} stalled {self._stall_resumes}x, "
                 "not resuming again (mission loop will move on)")
             self._goal_active = False
+            self._goal_state(active=False, result="stalled")
             return
         self._stall_resumes += 1
         if self._resume_timer is not None:
@@ -546,6 +562,7 @@ class CommandReceiver(Node):
             self._goal_active = False
             if self._resume_timer is not None:
                 self._resume_timer.cancel(); self._resume_timer = None
+            self._goal_state(active=False, result="canceled")
         if self.cancel_cli is None:
             self.cancel_cli = self.create_client(
                 CancelGoal, "/navigate_to_pose/_action/cancel_goal")
@@ -563,14 +580,17 @@ class CommandReceiver(Node):
                 self._resume_timer.cancel(); self._resume_timer = None
         self._goal_active = True
         self._goal_seq += 1
+        self._goal_state(active=True, result=None)
         if self.nav_client is None:
             try:
                 self.nav_client = ActionClient(self, NavigateToPose, "navigate_to_pose")
             except Exception as e:
                 self.get_logger().warn(f"could not create nav action client: {e}")
+                self._goal_active = False; self._goal_state(active=False, result="send_failed")
                 return
         if not self.nav_client.wait_for_server(timeout_sec=2.0):
             self.get_logger().warn("navigate_to_pose action server not available")
+            self._goal_active = False; self._goal_state(active=False, result="send_failed")
             return
         goal = NavigateToPose.Goal()
         p = PoseStamped()
@@ -591,22 +611,34 @@ class CommandReceiver(Node):
             gh = fut.result()
         except Exception as e:
             self.get_logger().warn(f"goal send failed: {e}")
-            if seq == self._goal_seq: self._goal_active = False
+            if seq == self._goal_seq:
+                self._goal_active = False; self._goal_state(active=False, result="send_failed")
             return
         if not gh.accepted:
             self.get_logger().warn("goal rejected by nav2")
-            if seq == self._goal_seq: self._goal_active = False
+            if seq == self._goal_seq:
+                self._goal_active = False; self._goal_state(active=False, result="rejected")
             return
         self._goal_handle = gh
-        gh.get_result_async().add_done_callback(lambda f, seq=seq: self._goal_done(seq))
+        gh.get_result_async().add_done_callback(lambda f, seq=seq: self._goal_done(f, seq))
 
-    def _goal_done(self, seq):
+    _STATUS = {4: "succeeded", 5: "canceled", 6: "aborted"}
+
+    def _goal_done(self, fut, seq):
         # result callback fires for success, abort AND cancel; ignore results of
         # superseded goals, and keep a goal resumable while a stall-resume is pending
         if seq != self._goal_seq:
             return
-        if self._resume_timer is None:
-            self._goal_active = False
+        try:
+            status = fut.result().status
+        except Exception:
+            status = None
+        name = self._STATUS.get(status, f"status{status}")
+        if self._resume_timer is not None and status == 5:
+            return                                    # our own stall cancel; resume pending
+        self._goal_active = False
+        self._goal_state(active=False, result=name)
+        self.get_logger().info(f"nav2 goal {name}")
 
 
 def main():

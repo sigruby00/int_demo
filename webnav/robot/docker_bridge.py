@@ -26,7 +26,7 @@ class DockerBridge:
         self._sock_recv.bind(("0.0.0.0", self.recv_port))
 
         # latest telemetry from ROS2
-        self.state = {"x": 0.0, "y": 0.0, "yaw": 0.0,
+        self.state = {"goal": None, "x": 0.0, "y": 0.0, "yaw": 0.0,
                       "linear": 0.0, "angular": 0.0, "battery": None,
                       "updated": 0.0}
         self._lock = threading.Lock()
@@ -50,6 +50,7 @@ class DockerBridge:
                         "linear": imu.get("linear_speed", 0.0) or 0.0,
                         "angular": imu.get("angular_speed", 0.0) or 0.0,
                         "battery": msg.get("battery", self.state["battery"]),
+                        "goal": msg.get("goal", self.state.get("goal")),
                         "updated": time.time(),
                     })
             except Exception as e:
