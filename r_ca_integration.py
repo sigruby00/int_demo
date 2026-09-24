@@ -887,9 +887,9 @@ def get_request(data):
 # via wlan0 (robot's own Wi-Fi kept associated to a fixed AP for fast switching).
 # The server drives this over OUR socket.io link (not OCACDB) with `set_uplink`.
 # ===========================================================================
-ROBOT_WIFI_SSID = "wifi_ap"
+ROBOT_WIFI_SSID = "wifi_ap_5G"           # WiFi2 moved to the AP's 5 GHz radio (ch 48) on 2026-09-24
 WIFI1_BSSID = "84:E8:CB:83:86:A2"        # module Wi-Fi AP (OCACDB NW-IF type 3)
-ROBOT_WIFI_BSSID = "84:E8:CB:3A:C5:62"   # robot's own Wi-Fi target (WiFi2)
+ROBOT_WIFI_BSSID = "84:E8:CB:3A:C5:69"   # robot's own Wi-Fi target (WiFi2, 5 GHz); 2.4 GHz twin was 84:E8:CB:3A:C5:62
 ROBOT_WIFI_GW = "10.100.61.141"          # WiFi2 gateway
 ROBOT_WIFI_DNS = "8.8.8.8"
 # password is passed by the server per-command; fallback to env (never in git)
