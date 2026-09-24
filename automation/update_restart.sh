@@ -18,6 +18,9 @@ echo "[update_restart] stopping stack..."
 tmux kill-session -t int_demo   2>/dev/null
 tmux kill-session -t robot_web  2>/dev/null
 tmux kill-session -t ros_bridge 2>/dev/null
+# the bridge runs INSIDE the container: killing the tmux session only kills the
+# docker-exec client, the old bridge keeps the UDP port and the new one cannot bind
+docker exec MentorPi pkill -f "python3 webnav/ros/ros_bridge_docker.py" 2>/dev/null
 sleep 2
 
 echo "[update_restart] relaunching..."
