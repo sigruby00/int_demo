@@ -1130,11 +1130,32 @@ WIFI_RSSI_PERIOD_S = 10.0
 wifi_rssi = {"wifi1": None, "wifi2": None, "assoc": None, "ts": 0}
 
 
+def _read_wifi_rssi_iw():
+    """Real dBm of both APs from the kernel scan cache (iw scan dump = no new
+    scan). nmcli's SIGNAL % saturates at 100 (= anything better than -50 dBm)
+    and compresses the rest, which made WiFi1 read a flat -50 on every robot."""
+    out = subprocess.run(["sudo", "-n", "iw", "dev", USE_INTERFACE_WLAN, "scan", "dump"],
+                         capture_output=True, text=True, timeout=8).stdout
+    want = {ROBOT_WIFI_BSSID.lower(): "wifi2", WIFI1_BSSID.lower(): "wifi1"}
+    res = {}
+    bss = None
+    for line in out.splitlines():
+        t = line.strip()
+        if t.startswith("BSS "):
+            bss = t.split()[1].split("(")[0].lower()
+        elif t.startswith("signal:") and bss in want:
+            try:
+                res[want[bss]] = round(float(t.split()[1]), 1)
+            except ValueError:
+                pass
+    return res
+
+
 def _read_wifi_rssi():
     out = subprocess.run(["nmcli", "-t", "-f", "BSSID,SIGNAL,ACTIVE", "dev", "wifi", "list",
                           "--rescan", "no"], capture_output=True, text=True, timeout=8).stdout
     want = {ROBOT_WIFI_BSSID.lower(): "wifi2", WIFI1_BSSID.lower(): "wifi1"}
-    res = {"wifi1": None, "wifi2": None, "assoc": None, "ts": int(time.time())}
+    res = {"wifi1": None, "wifi2": None, "assoc": None, "ts": int(time.time()), "src": "nm"}
     for line in out.splitlines():
         # nmcli escapes ':' in the BSSID as '\:'
         parts = line.replace("\\:", "|").split(":")
@@ -1151,6 +1172,18 @@ def _read_wifi_rssi():
         res[key] = round(pct / 2.0 - 100.0, 1)
         if parts[2].strip().lower() == "yes":
             res["assoc"] = key
+    # keep the nmcli-derived numbers (the GNN was trained on them) and report the
+    # real dBm on top when the kernel scan cache has both APs
+    res["nm"] = {"wifi1": res["wifi1"], "wifi2": res["wifi2"]}
+    try:
+        iw = _read_wifi_rssi_iw()
+        for k in ("wifi1", "wifi2"):
+            if iw.get(k) is not None:
+                res[k] = iw[k]
+        if iw:
+            res["src"] = "iw"
+    except Exception as e:
+        res["iw_error"] = str(e)[:60]
     return res
 
 
