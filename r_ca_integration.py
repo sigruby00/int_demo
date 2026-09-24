@@ -65,7 +65,7 @@ UDP_BITRATE_MBPS = 10.0
 # Constant TOTAL uplink load: camera (H.264, varies with scene brightness) + udpgen
 # are kept at TOTAL_TARGET_MBPS by re-tuning udpgen every second to fill what the
 # camera is not using. The dashboard "Mbps" sets this total when TRAFFIC_MODE="total".
-TOTAL_TARGET_MBPS = 20.0
+TOTAL_TARGET_MBPS = 25.0
 TRAFFIC_MODE = "total"          # "total" (camera+udp = target) | "udp" (udpgen fixed rate)
 TARGET_TO_IP = next((item['to_ip'] for item in TO_IP_LIST if item['to_id'] == to_id), None)
 
