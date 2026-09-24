@@ -93,6 +93,8 @@ class Sampler(Node):
         # AMCL (/amcl_pose) and slam_toolbox (/pose) publish map->base at their
         # update instants; we propagate it with the odom delta since then.
         self.loc = None           # (t_sec, x, y, yaw) map->base_footprint at t
+        self.loc_wall = 0.0       # wall-clock of the last AMCL pose / scan (freeze guard)
+        self.scan_wall = 0.0
         # nav2 goal bookkeeping shared with PoseSender (telemetry -> host mission loop)
         self.goal = {"seq": 0, "active": False, "result": None, "resumes": 0, "ts": 0.0}
         self._odom_hist = []      # [(t_sec, x, y, yaw)] ~10 Hz, last 3 s
@@ -117,6 +119,7 @@ class Sampler(Node):
             del self._odom_hist[0]
 
     def _loc(self, msg):
+        self.loc_wall = time.time()
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         p, q = msg.pose.pose.position, msg.pose.pose.orientation
         self.loc = (t, p.x, p.y, _yaw(q))
@@ -144,6 +147,7 @@ class Sampler(Node):
         self.gyro_z = msg.angular_velocity.z
 
     def _scan(self, msg):
+        self.scan_wall = time.time()
         self.scan = msg
 
     def poll(self):
@@ -293,6 +297,12 @@ class CommandReceiver(Node):
         # (robot pinned against a wall by a stale localisation / bad goal ->
         # motors cook). After WD_STALL s: stop + cancel the nav2 goal.
         self.WD_STALL = 5.0
+        # sensor-freeze guard: the robot is being commanded to move but the lidar
+        # scan (or, with a nav goal, the AMCL pose) stopped updating -> nav2 is
+        # driving blind (frozen costmap/localization). Stop + cancel the goal.
+        self.WD_SCAN_STALE = 3.0
+        self.WD_LOC_STALE = 8.0
+        self._wd_freeze_since = 0.0
         self._wd_last_lin = 0.0
         self._wd_last_ang = 0.0
         self._wd_stall_since = 0.0
@@ -421,6 +431,28 @@ class CommandReceiver(Node):
                     self._schedule_resume()
         else:
             self._wd_stall_since = 0.0
+        # ---- sensor-freeze guard --------------------------------------------
+        wall = time.time()
+        scan_age = wall - self.sampler.scan_wall if self.sampler.scan_wall else None
+        loc_age = wall - self.sampler.loc_wall if self.sampler.loc_wall else None
+        frozen = None
+        if cmd_moving and scan_age is not None and scan_age > self.WD_SCAN_STALE:
+            frozen = f"lidar scan stale {scan_age:.1f}s"
+        elif cmd_moving and self._goal_active and loc_age is not None and loc_age > self.WD_LOC_STALE:
+            frozen = f"AMCL pose stale {loc_age:.1f}s"
+        if frozen:
+            if now - self._wd_freeze_since > self.WD_STALL:       # rate-limit the reaction
+                self._wd_freeze_since = now
+                self._wd_events += 1
+                self._tele_until = 0.0; self._tele_idle = True
+                self.cmd_vel.publish(Twist())
+                resume = self._goal_active and self._last_goal is not None
+                self.cancel_nav("sensor freeze", keep_goal=resume)
+                self.get_logger().error(
+                    f"base watchdog SENSOR FREEZE: {frozen} while commanded "
+                    f"lin={self._wd_last_lin:.2f} ang={self._wd_last_ang:.2f} -> stop + cancel nav")
+                if resume:
+                    self._schedule_resume()
         if now <= self._tele_until:
             return                                    # teleop heartbeat owns the base
         # redundant zeros after a stop (only while nobody asked to move again)

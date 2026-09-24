@@ -32,6 +32,9 @@ class DockerBridge:
         self._lock = threading.Lock()
         self._running = True
         self._t = threading.Thread(target=self._recv_loop, daemon=True)
+        # outside-ROS deadman: no telemetry for 2.5 s -> stop frames to the motor board
+        from robot import base_failsafe
+        self.deadman = base_failsafe.Deadman(lambda: self.state.get("updated", 0))
         self._t.start()
 
     def _recv_loop(self):

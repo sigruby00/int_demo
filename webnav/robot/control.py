@@ -12,7 +12,7 @@ from config import settings
 
 ARRIVE_RADIUS = 0.5         # m: within this of a waypoint counts as "arrived" (nav2 tol. 0.25)
 WAYPOINT_TIMEOUT = 90.0     # s: give up on a waypoint after this long
-MISSION_RETRIES = 2         # re-send a goal nav2 aborted/stalled this many times before moving on
+MISSION_RETRIES = 1         # re-send a goal nav2 aborted/stalled once before moving on (each retry = one more recovery spin)
 
 
 class Control:

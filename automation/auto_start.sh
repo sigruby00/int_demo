@@ -52,6 +52,7 @@ docker exec -u ubuntu "$DOCKER_NAME" /bin/bash -lc \
 if ! tmux has-session -t ros_bridge 2>/dev/null; then
   echo "[INFO] tmux 'ros_bridge': webnav/ros/ros_bridge_docker.py"
   tmux new-session -d -s ros_bridge -n shell
+  mkdir -p /home/pi/int_demo_logs && tmux pipe-pane -t ros_bridge:1 -o "cat >> /home/pi/int_demo_logs/ros_bridge.log"
   tmux send-keys -t ros_bridge:1 \
     "while true; do docker exec -u ubuntu -w $REPO_DOCKER $DOCKER_NAME /bin/zsh -c 'source $ROS_WS/.zshrc; python3 webnav/ros/ros_bridge_docker.py'; echo '[WARN] ros_bridge ended, retry in 3s'; sleep 3; done" C-m
 fi
@@ -60,6 +61,7 @@ fi
 if ! tmux has-session -t robot_web 2>/dev/null; then
   echo "[INFO] tmux 'robot_web': webnav/web/server.py"
   tmux new-session -d -s robot_web -n shell
+  mkdir -p /home/pi/int_demo_logs && tmux pipe-pane -t robot_web:1 -o "cat >> /home/pi/int_demo_logs/robot_web.log"
   tmux send-keys -t robot_web:1 \
     "cd $REPO_HOST && while true; do python3 webnav/web/server.py; echo '[WARN] web crashed, restart in 3s'; sleep 3; done" C-m
 fi
