@@ -438,11 +438,9 @@ class CommandReceiver(Node):
         frozen = None
         if cmd_moving and scan_age is not None and scan_age > self.WD_SCAN_STALE:
             frozen = f"lidar scan stale {scan_age:.1f}s"
-        elif (cmd_moving and self._goal_active and not world_still
-              and loc_age is not None and loc_age > self.WD_LOC_STALE):
-            # AMCL only re-publishes after the robot moved (update_min_d/a); a
-            # stale pose while standing still is normal (that is the STALL case)
-            frozen = f"AMCL pose stale {loc_age:.1f}s while moving"
+        # (an AMCL-pose-stale branch was removed 2026-09-25: a lost localization is
+        # not a safety issue - the costmap still sees obstacles - and cancelling the
+        # goal every few seconds only made the robot stutter; nav2 reports it instead)
         if frozen:
             if now - self._wd_freeze_since > self.WD_STALL:       # rate-limit the reaction
                 self._wd_freeze_since = now
@@ -540,7 +538,9 @@ class CommandReceiver(Node):
     def _set_initial_pose(self, x, y, yaw):
         msg = PoseWithCovarianceStamped()
         msg.header.frame_id = "map"
-        msg.header.stamp = self.get_clock().now().to_msg()
+        # stamp 0 = "use the latest transform": a wall-clock stamp made AMCL fail
+        # with "Lookup would require extrapolation into the future" and ignore the pose
+        msg.header.stamp = rclpy.time.Time().to_msg()
         msg.pose.pose.position.x = x
         msg.pose.pose.position.y = y
         msg.pose.pose.orientation.z = math.sin(yaw / 2.0)

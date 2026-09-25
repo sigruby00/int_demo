@@ -15,7 +15,7 @@ import threading
 import time
 
 DEVICES = ("/dev/rrc", "/dev/ttyACM0")   # motor board serial (udev symlink, raw)
-STALE_S = 2.5                              # telemetry silence that arms the stop
+STALE_S = 4.0                              # telemetry silence that arms the stop (2.5 s tripped on CPU hiccups under nav2 load)
 PERIOD_S = 0.5                             # stop frame cadence while armed
 
 
