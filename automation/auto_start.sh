@@ -19,6 +19,18 @@ ROS_WS="/home/ubuntu/ros2_ws"
 cd "$REPO_HOST" || exit 1
 
 # --- keep robots on latest main (fleet auto-update) ----------------------
+# ---- clock: get the one-time chrony step (to the TO's clock) done BEFORE ROS is
+# used. A step while nav2 runs breaks AMCL/costmap (scans older than the TF cache).
+echo "[INFO] Waiting for chrony to sync to the TO (up to 3 min)..."
+T0=$(date +%s.%N)
+chronyc waitsync 36 1 0 5 >/dev/null 2>&1 && echo "[INFO] chrony synced" || echo "[WARN] chrony not synced yet (TO unreachable?) - continuing"
+sudo -n chronyc makestep >/dev/null 2>&1
+T1=$(date +%s.%N); MONO_DELTA=$(python3 -c "print(abs(($T1-$T0)))")
+OFF=$(chronyc tracking 2>/dev/null | awk -F': ' '/Last offset/ {print $2}' | awk '{print ($1<0?-$1:$1)}')
+echo "[INFO] chrony last offset now: ${OFF:-?} s"
+if python3 -c "import sys; sys.exit(0 if float('${OFF:-0}') > 1.0 else 1)"; then
+  echo "[WARN] clock still off by >1 s - the container will be restarted by clock_guard when it steps"
+fi
 echo "[INFO] Pulling latest code from origin/main..."
 git fetch --all && git reset --hard origin/main
 sleep 3
@@ -60,6 +72,13 @@ if ! tmux has-session -t ros_bridge 2>/dev/null; then
 fi
 
 # --- 4) per-Pi web server (resilient) ------------------------------------
+if ! tmux has-session -t clock_guard 2>/dev/null; then
+  echo "[INFO] tmux 'clock_guard': automation/clock_guard.py"
+  tmux new-session -d -s clock_guard -n shell
+  mkdir -p /home/pi/int_demo_logs && tmux pipe-pane -t clock_guard:1 -o "cat >> /home/pi/int_demo_logs/clock_guard.log"
+  tmux send-keys -t clock_guard:1 \
+    "cd $REPO_HOST && while true; do python3 automation/clock_guard.py; echo '[WARN] clock_guard ended, restart in 3s'; sleep 3; done" C-m
+fi
 if ! tmux has-session -t robot_web 2>/dev/null; then
   echo "[INFO] tmux 'robot_web': webnav/web/server.py"
   tmux new-session -d -s robot_web -n shell
