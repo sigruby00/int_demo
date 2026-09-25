@@ -307,6 +307,7 @@ class CommandReceiver(Node):
         self.WD_LOC_STALE = 12.0
         self._wd_freeze_since = 0.0
         self._loc_lost_reported = False
+        self._goal_sent_wall = 0.0
         self._wd_last_lin = 0.0
         self._wd_last_ang = 0.0
         self._wd_stall_since = 0.0
@@ -438,7 +439,10 @@ class CommandReceiver(Node):
         # ---- sensor-freeze guard --------------------------------------------
         wall = time.time()
         scan_age = wall - self.sampler.scan_wall if self.sampler.scan_wall else None
-        loc_age = wall - self.sampler.loc_wall if self.sampler.loc_wall else None
+        # AMCL only publishes while the robot moves, so a pose that is old because the
+        # robot stood still is normal: measure the silence from the later of the last
+        # AMCL pose and the moment the current goal was sent
+        loc_age = (wall - max(self.sampler.loc_wall, self._goal_sent_wall)) if self.sampler.loc_wall else None
         frozen = None
         if cmd_moving and scan_age is not None and scan_age > self.WD_SCAN_STALE:
             frozen = f"lidar scan stale {scan_age:.1f}s"
@@ -635,6 +639,7 @@ class CommandReceiver(Node):
                 self._resume_timer.cancel(); self._resume_timer = None
         self._goal_active = True
         self._goal_seq += 1
+        self._goal_sent_wall = time.time()        # localization-lost timer starts here, not at the last AMCL pose
         self._goal_state(active=True, result=None)
         if self.nav_client is None:
             try:
