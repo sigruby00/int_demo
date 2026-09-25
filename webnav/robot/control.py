@@ -151,6 +151,13 @@ class Control:
             self._mission.update({"message": f"mission error: {e}"})
         finally:
             done = not self._mission_stop.is_set()
+            # the last waypoint counts as reached at ARRIVE_RADIUS, but nav2 keeps
+            # chasing its own tighter tolerance and DWB orbits the goal for ever:
+            # always cancel the nav2 goal when the route ends
+            try:
+                self.cancel_goal()
+            except Exception:
+                pass
             self._mission.update({"running": False, "target": None,
                                   "message": "route complete" if done else "stopped"})
 
