@@ -16,7 +16,10 @@ RULES = {
     "params": [(r"^(\s*max_velocity:\s*\[)\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)\s*(\].*)$", "vec"),
                (r"^(\s*max_rotational_vel:\s*)([0-9.]+)(.*)$", "one")],
     "dwb": [(r"^(\s*max_vel_x:\s*)([0-9.]+)(.*)$", "one"), (r"^(\s*min_vel_x:\s*)(-?[0-9.]+)(.*)$", "one"),
-            (r"^(\s*max_vel_theta:\s*)([0-9.]+)(.*)$", "one"), (r"^(\s*max_speed_xy:\s*)([0-9.]+)(.*)$", "one")],
+            (r"^(\s*max_vel_theta:\s*)([0-9.]+)(.*)$", "one"), (r"^(\s*max_speed_xy:\s*)([0-9.]+)(.*)$", "one"),
+            # Regulated Pure Pursuit (robots 3/6 carry it in the same file name)
+            (r"^(\s*desired_linear_vel:\s*)([0-9.]+)(.*)$", "one"),
+            (r"^(\s*rotate_to_heading_angular_vel:\s*)([0-9.]+)(.*)$", "one")],
 }
 
 def fmt(v):
