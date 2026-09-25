@@ -54,6 +54,7 @@ class DockerBridge:
                         "angular": imu.get("angular_speed", 0.0) or 0.0,
                         "battery": msg.get("battery", self.state["battery"]),
                         "goal": msg.get("goal", self.state.get("goal")),
+                        "battery_age": msg.get("battery_age"),
                         "updated": time.time(),
                     })
             except Exception as e:

@@ -33,6 +33,10 @@ if python3 -c "import sys; sys.exit(0 if abs($STEP) > 1.0 else 1)"; then
   docker restart MentorPi >/dev/null 2>&1 || sudo -n docker restart MentorPi >/dev/null 2>&1
   sleep 20
 fi
+if [ -f /boot/firmware/config.txt ] && ! grep -q "^usb_max_current_enable=1" /boot/firmware/config.txt; then
+  echo "[INFO] enabling usb_max_current_enable=1 (Pi 5 USB budget 0.6 A -> 1.6 A; takes effect after the next reboot)"
+  echo "usb_max_current_enable=1" | sudo -n tee -a /boot/firmware/config.txt >/dev/null
+fi
 echo "[INFO] Pulling latest code from origin/main..."
 git fetch --all && git reset --hard origin/main
 sleep 3
@@ -80,6 +84,13 @@ if ! tmux has-session -t clock_guard 2>/dev/null; then
   mkdir -p /home/pi/int_demo_logs && tmux pipe-pane -t clock_guard:1 -o "cat >> /home/pi/int_demo_logs/clock_guard.log"
   tmux send-keys -t clock_guard:1 \
     "cd $REPO_HOST && while true; do python3 automation/clock_guard.py; echo '[WARN] clock_guard ended, restart in 3s'; sleep 3; done" C-m
+fi
+if ! tmux has-session -t board_guard 2>/dev/null; then
+  echo "[INFO] tmux 'board_guard': automation/board_guard.py"
+  tmux new-session -d -s board_guard -n shell
+  mkdir -p /home/pi/int_demo_logs && tmux pipe-pane -t board_guard:1 -o "cat >> /home/pi/int_demo_logs/board_guard.log"
+  tmux send-keys -t board_guard:1 \
+    "cd $REPO_HOST && while true; do python3 automation/board_guard.py; echo '[WARN] board_guard ended, restart in 3s'; sleep 3; done" C-m
 fi
 if ! tmux has-session -t robot_web 2>/dev/null; then
   echo "[INFO] tmux 'robot_web': webnav/web/server.py"

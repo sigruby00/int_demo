@@ -78,6 +78,7 @@ class Sampler(Node):
         super().__init__("tus_sampler")
         self.odom = None          # latest nav_msgs/Odometry
         self.battery = None
+        self.battery_wall = 0.0   # wall-clock of the last battery msg = motor board link alive
         self.gyro_z = 0.0
         self.scan = None          # latest LaserScan
         self._scan_hist = []      # [(t, ranges)] ~4 Hz, last ~1.5 s
@@ -140,6 +141,7 @@ class Sampler(Node):
                 "yaw": math.atan2(math.sin(TH + dth), math.cos(TH + dth))}
 
     def _battery(self, msg):
+        self.battery_wall = time.time()
         # controller reports battery as a 0..~105 scaled value -> percent
         self.battery = round(msg.data / 105.0, 1)
 
@@ -228,6 +230,7 @@ class PoseSender(Node):
         vx, _, wz = self.sampler.speeds()
         imu = {"linear_speed": vx, "angular_speed": wz, "angular_velocity_z": wz}
         payload = {"pos": self.pos, "imu": imu, "battery": self.sampler.battery,
+                   "battery_age": (round(time.time() - self.sampler.battery_wall, 1) if self.sampler.battery_wall else None),
                    "goal": self.sampler.goal}
         try:
             self.sock.sendto(json.dumps(payload).encode(), (HOST_IP, TELEMETRY_PORT))
