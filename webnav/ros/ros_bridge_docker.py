@@ -301,8 +301,9 @@ class CommandReceiver(Node):
         # scan (or, with a nav goal, the AMCL pose) stopped updating -> nav2 is
         # driving blind (frozen costmap/localization). Stop + cancel the goal.
         self.WD_SCAN_STALE = 3.0
-        self.WD_LOC_STALE = 8.0
+        self.WD_LOC_STALE = 12.0
         self._wd_freeze_since = 0.0
+        self._loc_lost_reported = False
         self._wd_last_lin = 0.0
         self._wd_last_ang = 0.0
         self._wd_stall_since = 0.0
@@ -438,9 +439,24 @@ class CommandReceiver(Node):
         frozen = None
         if cmd_moving and scan_age is not None and scan_age > self.WD_SCAN_STALE:
             frozen = f"lidar scan stale {scan_age:.1f}s"
-        # (an AMCL-pose-stale branch was removed 2026-09-25: a lost localization is
-        # not a safety issue - the costmap still sees obstacles - and cancelling the
-        # goal every few seconds only made the robot stutter; nav2 reports it instead)
+        # localization lost: a nav goal is active, the robot has been moving, but
+        # AMCL has not published for WD_LOC_STALE s (seen after chrony clock steps:
+        # the TF cache resets and AMCL/costmap drop every scan). nav2 then drives on
+        # odometry alone and overshoots waypoints. Stop ONCE, cancel the goal
+        # without resuming, and report 'localization_lost' so the route ends.
+        if (self._goal_active and self._last_goal is not None and not world_still
+                and loc_age is not None and loc_age > self.WD_LOC_STALE
+                and not self._loc_lost_reported):
+            self._loc_lost_reported = True
+            self._tele_until = 0.0; self._tele_idle = True
+            self.cmd_vel.publish(Twist())
+            self.cancel_nav("localization lost", keep_goal=False)
+            self._goal_state(active=False, result="localization_lost")
+            self.get_logger().error(
+                f"base watchdog LOCALIZATION LOST: AMCL pose stale {loc_age:.1f}s while moving "
+                f"-> stop, goal cancelled, route must be restarted after Set pose")
+        if loc_age is not None and loc_age < 2.0:
+            self._loc_lost_reported = False              # AMCL is alive again
         if frozen:
             if now - self._wd_freeze_since > self.WD_STALL:       # rate-limit the reaction
                 self._wd_freeze_since = now

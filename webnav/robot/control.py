@@ -130,6 +130,10 @@ class Control:
                         except Exception as e:            # never let one hop kill the loop
                             self._mission.update({"message": f"error at {name}: {e}"})
                             outcome = "failed"
+                        if outcome == "localization_lost":
+                            self._mission.update({"message": f"localization lost at {name}: route stopped - Set pose and restart"})
+                            self._mission_stop.set()
+                            break
                         # nav2 gave up (abort / rejected / stalled): re-send instead of idling
                         if outcome == "failed" and attempt < MISSION_RETRIES and not self._mission_stop.is_set():
                             attempt += 1
@@ -140,6 +144,8 @@ class Control:
                     if outcome != "arrived":
                         self.cancel_goal()            # never leave a stale goal running
                         if self._mission_stop.is_set():
+                            if outcome == "localization_lost":
+                                self._mission["final_message"] = self._mission.get("message")
                             break
                         self._mission.update({"message": f"{outcome} at {name}, continuing"})
                         continue
@@ -159,7 +165,7 @@ class Control:
             except Exception:
                 pass
             self._mission.update({"running": False, "target": None,
-                                  "message": "route complete" if done else "stopped"})
+                                  "message": self._mission.pop("final_message", None) or ("route complete" if done else "stopped")})
 
     def _goto_and_wait(self, gx, gy):
         """Send the goal and wait for it. Returns 'arrived' | 'failed' | 'timeout' | 'stopped'.
@@ -184,6 +190,8 @@ class Control:
                 r = g.get("result")
                 if r == "succeeded":
                     return "arrived"
+                if r == "localization_lost":
+                    return "localization_lost"
                 if r in ("aborted", "rejected", "send_failed", "stalled", "canceled") or (r or "").startswith("status"):
                     return "failed"
             time.sleep(0.4)
