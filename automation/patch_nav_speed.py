@@ -19,7 +19,9 @@ RULES = {
             (r"^(\s*max_vel_theta:\s*)([0-9.]+)(.*)$", "one"), (r"^(\s*max_speed_xy:\s*)([0-9.]+)(.*)$", "one")],
 }
 
-def fmt(v): return f"{v:.3f}".rstrip("0").rstrip(".")
+def fmt(v):
+    s = f"{v:.3f}".rstrip("0")
+    return s + "0" if s.endswith(".") else s      # keep a float literal (ROS param arrays must not mix int/float)
 
 def patch(path, kind, factor):
     try:
