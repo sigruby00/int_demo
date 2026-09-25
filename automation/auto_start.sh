@@ -22,14 +22,16 @@ cd "$REPO_HOST" || exit 1
 # ---- clock: get the one-time chrony step (to the TO's clock) done BEFORE ROS is
 # used. A step while nav2 runs breaks AMCL/costmap (scans older than the TF cache).
 echo "[INFO] Waiting for chrony to sync to the TO (up to 3 min)..."
-T0=$(date +%s.%N)
+BASE0=$(python3 -c "import time; print(time.time()-time.monotonic())")
 chronyc waitsync 36 1 0 5 >/dev/null 2>&1 && echo "[INFO] chrony synced" || echo "[WARN] chrony not synced yet (TO unreachable?) - continuing"
-sudo -n chronyc makestep >/dev/null 2>&1
-T1=$(date +%s.%N); MONO_DELTA=$(python3 -c "print(abs(($T1-$T0)))")
-OFF=$(chronyc tracking 2>/dev/null | awk -F': ' '/Last offset/ {print $2}' | awk '{print ($1<0?-$1:$1)}')
-echo "[INFO] chrony last offset now: ${OFF:-?} s"
-if python3 -c "import sys; sys.exit(0 if float('${OFF:-0}') > 1.0 else 1)"; then
-  echo "[WARN] clock still off by >1 s - the container will be restarted by clock_guard when it steps"
+sudo -n chronyc makestep >/dev/null 2>&1; sleep 1
+BASE1=$(python3 -c "import time; print(time.time()-time.monotonic())")
+STEP=$(python3 -c "print(round($BASE1-$BASE0, 2))")
+echo "[INFO] clock step applied at boot: ${STEP}s (chrony offset now $(chronyc tracking 2>/dev/null | awk -F': ' '/Last offset/ {print $2}'))"
+if python3 -c "import sys; sys.exit(0 if abs($STEP) > 1.0 else 1)"; then
+  echo "[INFO] clock stepped by ${STEP}s -> restarting MentorPi so bringup/lidar use the corrected clock"
+  docker restart MentorPi >/dev/null 2>&1 || sudo -n docker restart MentorPi >/dev/null 2>&1
+  sleep 20
 fi
 echo "[INFO] Pulling latest code from origin/main..."
 git fetch --all && git reset --hard origin/main
