@@ -692,6 +692,8 @@ class CommandReceiver(Node):
         if self._resume_timer is not None and status == 5:
             return                                    # our own stall cancel; resume pending
         self._goal_active = False
+        if self.sampler.goal.get("result") == "localization_lost" and self.sampler.goal.get("seq") == seq:
+            return                                    # keep the verdict; nav2's 'canceled' must not turn it into a retry
         self._goal_state(active=False, result=name)
         self.get_logger().info(f"nav2 goal {name}")
 
